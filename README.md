@@ -18,7 +18,7 @@ Summit is a graphical editor for Celeste map files. It uses Cairn for file conve
 ## Building from Source
 
 ```bash
-git clone https://github.com/yourusername/summit.git
+git clone https://github.com/Aqu1tain/summit.git
 cd summit
 cargo build --release
 ```
