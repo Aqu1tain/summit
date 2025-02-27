@@ -1,8 +1,8 @@
-use cairn::bin_to_json;
+use cairn::{bin_to_json, json_to_bin};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
-use std::process::Command;
+use std::io::Write;
 
 use crate::app::CelesteMapEditor;
 
@@ -44,37 +44,23 @@ pub fn load_map(editor: &mut CelesteMapEditor, bin_path: &str) {
     }
 }
 
-/// Save the map to its current binary file
 pub fn save_map(editor: &CelesteMapEditor) {
     if let (Some(map_data), Some(bin_path), Some(temp_json_path)) = (&editor.map_data, &editor.bin_path, &editor.temp_json_path) {
-        // First save the JSON to the temporary file
+        // Save the JSON to a temporary file
         match serde_json::to_string_pretty(map_data) {
             Ok(json_str) => {
-                if let Err(e) = std::fs::write(&temp_json_path, json_str) {
+                if let Err(e) = File::create(&temp_json_path).and_then(|mut file| file.write_all(json_str.as_bytes())) {
                     eprintln!("Failed to write temporary JSON file: {}", e);
                     return;
                 }
-                
-                // Now convert the JSON to BIN using Cairn
-                match Command::new("cairn")
-                    .args(&["json2bin", &temp_json_path, &bin_path])
-                    .status() 
-                {
-                    Ok(status) => {
-                        if !status.success() {
-                            eprintln!("Failed to convert JSON to BIN: Cairn exited with status {}", status);
-                        } else {
-                            println!("Map saved successfully to {}", bin_path);
-                        }
-                    },
-                    Err(e) => {
-                        eprintln!("Failed to execute Cairn command: {}", e);
-                    }
+
+                // Convert JSON to BIN using Cairn Rust library
+                match json_to_bin(&temp_json_path, &bin_path) {
+                    Ok(_) => println!("Map saved successfully to {}", bin_path),
+                    Err(e) => eprintln!("Failed to convert JSON to BIN: {}", e),
                 }
             }
-            Err(e) => {
-                eprintln!("Failed to serialize map data: {}", e);
-            }
+            Err(e) => eprintln!("Failed to serialize map data: {}", e),
         }
     }
 }
@@ -88,38 +74,26 @@ pub fn save_map_as(editor: &mut CelesteMapEditor) {
         {
             let new_bin_path_str = new_bin_path.display().to_string();
             let new_temp_json_path = get_temp_json_path(&new_bin_path_str);
-            
+
             // Save the JSON to the temporary file
             match serde_json::to_string_pretty(map_data) {
                 Ok(json_str) => {
-                    if let Err(e) = std::fs::write(&new_temp_json_path, json_str) {
+                    if let Err(e) = File::create(&new_temp_json_path).and_then(|mut file| file.write_all(json_str.as_bytes())) {
                         eprintln!("Failed to write temporary JSON file: {}", e);
                         return;
                     }
-                    
-                    // Now convert the JSON to BIN using Cairn
-                    match Command::new("cairn")
-                        .args(&["json2bin", &new_temp_json_path, &new_bin_path_str])
-                        .status() 
-                    {
-                        Ok(status) => {
-                            if !status.success() {
-                                eprintln!("Failed to convert JSON to BIN: Cairn exited with status {}", status);
-                            } else {
-                                println!("Map saved successfully to {}", new_bin_path_str);
-                                // Update paths
-                                editor.bin_path = Some(new_bin_path_str);
-                                editor.temp_json_path = Some(new_temp_json_path);
-                            }
-                        },
-                        Err(e) => {
-                            eprintln!("Failed to execute Cairn command: {}", e);
+
+                    // Convert JSON to BIN using Cairn Rust library
+                    match json_to_bin(&new_temp_json_path, &new_bin_path_str) {
+                        Ok(_) => {
+                            println!("Map saved successfully to {}", new_bin_path_str);
+                            editor.bin_path = Some(new_bin_path_str);
+                            editor.temp_json_path = Some(new_temp_json_path);
                         }
+                        Err(e) => eprintln!("Failed to convert JSON to BIN: {}", e),
                     }
                 }
-                Err(e) => {
-                    eprintln!("Failed to serialize map data: {}", e);
-                }
+                Err(e) => eprintln!("Failed to serialize map data: {}", e),
             }
         }
     }
