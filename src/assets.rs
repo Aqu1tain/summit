@@ -4,11 +4,14 @@ use std::collections::HashMap;
 use image::RgbaImage;
 use eframe::egui;
 
+use crate::celeste_atlas::{AtlasManager, Sprite};
+
 /// Structure to manage Celeste installation and asset loading
 pub struct CelesteAssets {
     pub celeste_dir: Option<PathBuf>,
     pub texture_cache: HashMap<String, egui::TextureHandle>,
     pub textures: HashMap<String, RgbaImage>,
+    pub atlas_manager: Option<AtlasManager>,
 }
 
 impl CelesteAssets {
@@ -17,6 +20,7 @@ impl CelesteAssets {
             celeste_dir: None,
             texture_cache: HashMap::new(),
             textures: HashMap::new(),
+            atlas_manager: Some(AtlasManager::new()),
         };
         
         // Try to detect Celeste installation
@@ -33,6 +37,31 @@ impl CelesteAssets {
         }
         
         assets
+    }
+
+    /// Initialize the atlas manager and load game assets
+    pub fn init_atlas(&mut self, ctx: &egui::Context) -> bool {
+        if self.celeste_dir.is_none() {
+            return false;
+        }
+        
+        let celeste_dir = self.celeste_dir.as_ref().unwrap();
+        
+        // Load the gameplay atlas which contains most tiles
+        if let Some(atlas_manager) = &mut self.atlas_manager {
+            match atlas_manager.load_atlas("Gameplay", celeste_dir, ctx) {
+                Ok(_) => {
+                    println!("Successfully loaded Gameplay atlas");
+                    true
+                },
+                Err(e) => {
+                    eprintln!("Failed to load Gameplay atlas: {}", e);
+                    false
+                }
+            }
+        } else {
+            false
+        }
     }
 
     pub fn detect_celeste_installation(&mut self) {
@@ -93,11 +122,20 @@ impl CelesteAssets {
             return self.texture_cache.get(texture_path);
         }
 
+        // Try to load from atlas first
+        if let Some(atlas_manager) = &self.atlas_manager {
+            if let Some(sprite_path) = atlas_manager.get_texture_path_for_tile(texture_path.chars().next().unwrap_or('0')) {
+                if let Some(_sprite) = atlas_manager.get_sprite("Gameplay", sprite_path) {
+                    // The sprite exists in the atlas, create a handle for it
+                    // Note: This is a bit of a simplification - we'd need to extract the specific tile
+                    return None;
+                }
+            }
+        }
+
+        // Fall back to loading individual PNGs
         if let Some(celeste_dir) = &self.celeste_dir {
             // Attempt to load the texture from the Celeste installation
-            // Note: In a real implementation, you'd need to decode XNB files
-            // or use pre-extracted assets
-            
             let full_path = celeste_dir
                 .join("Content")
                 .join("Graphics")
@@ -119,15 +157,12 @@ impl CelesteAssets {
                 }
             }
             
-            // Try XNB file as fallback (requires XNB extraction implementation)
+            // Try XNB file as fallback
             let xnb_path = full_path.with_extension("xnb");
             if xnb_path.exists() {
-                if let Some(image) = extract_xnb_texture(&xnb_path) {
-                    let texture_handle = add_image_to_egui(ctx, &image, texture_path);
-                    self.textures.insert(texture_path.to_string(), image);
-                    self.texture_cache.insert(texture_path.to_string(), texture_handle);
-                    return self.texture_cache.get(texture_path);
-                }
+                // XNB handling would go here
+                // This is just a placeholder - we don't implement XNB extraction yet
+                println!("XNB file found but not supported yet: {}", xnb_path.display());
             }
         }
         
@@ -141,6 +176,9 @@ impl CelesteAssets {
             self.texture_cache.clear();
             self.textures.clear();
             
+            // Reset atlas manager
+            self.atlas_manager = Some(AtlasManager::new());
+            
             // Save the path to config
             save_celeste_path(&path.to_string_lossy());
             
@@ -150,8 +188,8 @@ impl CelesteAssets {
         }
     }
     
+    /// Get the appropriate texture path for a tile character
     pub fn get_texture_path_for_tile(&self, tile_char: char) -> Option<&'static str> {
-        // Map tile characters to actual texture filenames from Celeste
         match tile_char {
             '9' => Some("tilesSolid.png"),  // Main solid tiles texture
             'm' => Some("mountainTiles.png"), // Mountain tiles
@@ -159,6 +197,27 @@ impl CelesteAssets {
             'a' => Some("coreTiles.png"),     // Core (alt) tiles
             _ => None
         }
+    }
+    
+    /// Get a sprite from the atlas for a specific tile character
+    pub fn get_sprite_for_tile(&self, tile_char: char) -> Option<&Sprite> {
+        if let Some(atlas_manager) = &self.atlas_manager {
+            if let Some(sprite_path) = atlas_manager.get_texture_path_for_tile(tile_char) {
+                return atlas_manager.get_sprite("Gameplay", sprite_path);
+            }
+        }
+        None
+    }
+    
+    /// Draw a sprite from the atlas
+    pub fn draw_sprite_for_tile(&self, painter: &egui::Painter, rect: egui::Rect, tile_char: char) -> bool {
+        if let Some(atlas_manager) = &self.atlas_manager {
+            if let Some(sprite) = self.get_sprite_for_tile(tile_char) {
+                atlas_manager.draw_sprite(sprite, painter, rect, egui::Color32::WHITE);
+                return true;
+            }
+        }
+        false
     }
 }
 
@@ -168,19 +227,6 @@ fn load_texture_from_path(path: &Path) -> Result<RgbaImage, String> {
         Ok(img) => Ok(img.to_rgba8()),
         Err(e) => Err(format!("Failed to load image: {}", e))
     }
-}
-
-fn extract_xnb_texture(_path: &Path) -> Option<RgbaImage> {
-    // This is a placeholder for XNB extraction functionality
-    // In a real implementation, you'd need a library or custom code
-    // to extract textures from XNB files
-    
-    // Example libraries:
-    // - xnb (Rust crate)
-    // - xnbcli (Node.js tool)
-    // - XnbExtract (C# tool)
-    
-    None
 }
 
 fn add_image_to_egui(ctx: &egui::Context, image: &RgbaImage, name: &str) -> egui::TextureHandle {

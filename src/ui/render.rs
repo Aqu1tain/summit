@@ -50,11 +50,16 @@ fn render_current_room(editor: &mut CelesteMapEditor, painter: &egui::Painter, s
                     
                     // Use textures if enabled and available
                     if editor.use_textures {
-                        if let Some(texture_path) = editor.celeste_assets.get_texture_path_for_tile(c) {
-                            if let Some(texture_handle) = editor.celeste_assets.load_texture(texture_path, ctx) {
-                                // Draw the texture using our helper
-                                draw_texture(painter, rect, texture_handle.id(), Color32::WHITE);
-                                used_texture = true;
+                        // First try to use the atlas system
+                        used_texture = editor.draw_sprite_for_tile(painter, rect, c);
+                        
+                        // Fall back to the old PNG texture loading system if atlas didn't work
+                        if !used_texture {
+                            if let Some(texture_path) = editor.celeste_assets.get_texture_path_for_tile(c) {
+                                if let Some(texture_handle) = editor.celeste_assets.load_texture(texture_path, ctx) {
+                                    draw_texture(painter, rect, texture_handle.id(), Color32::WHITE);
+                                    used_texture = true;
+                                }
                             }
                         }
                     }
@@ -188,11 +193,16 @@ fn render_room(editor: &mut CelesteMapEditor, painter: &egui::Painter, level: &s
                                     
                                     // Use textures if enabled and available
                                     if editor.use_textures {
-                                        if let Some(texture_path) = editor.celeste_assets.get_texture_path_for_tile(c) {
-                                            if let Some(texture_handle) = editor.celeste_assets.load_texture(texture_path, ctx) {
-                                                // Draw the texture using our helper function
-                                                draw_texture(painter, rect, texture_handle.id(), Color32::WHITE);
-                                                used_texture = true;
+                                        // Try using the atlas system first
+                                        used_texture = editor.draw_sprite_for_tile(painter, rect, c);
+                                        
+                                        // Fall back to the old PNG texture loading
+                                        if !used_texture {
+                                            if let Some(texture_path) = editor.celeste_assets.get_texture_path_for_tile(c) {
+                                                if let Some(texture_handle) = editor.celeste_assets.load_texture(texture_path, ctx) {
+                                                    draw_texture(painter, rect, texture_handle.id(), Color32::WHITE);
+                                                    used_texture = true;
+                                                }
                                             }
                                         }
                                     }

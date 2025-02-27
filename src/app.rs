@@ -58,17 +58,32 @@ impl Default for CelesteMapEditor {
 }
 
 impl CelesteMapEditor {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        // Customize egui here with cc.egui_ctx.set_fonts and cc.egui_ctx.set_visuals.
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut editor = Self::default();
         editor.key_bindings.load();
         
         // Check if Celeste assets are available, show dialog if not
         if editor.celeste_assets.celeste_dir.is_none() {
             editor.show_celeste_path_dialog = true;
+        } else {
+            // Initialize atlas manager if Celeste directory is found
+            if editor.celeste_assets.init_atlas(&cc.egui_ctx) {
+                println!("Successfully initialized atlas manager");
+            } else {
+                println!("Failed to initialize atlas manager, falling back to PNG loading");
+            }
         }
         
         editor
+    }
+
+    pub fn get_sprite_for_tile(&self, tile_char: char) -> Option<&crate::celeste_atlas::Sprite> {
+        self.celeste_assets.get_sprite_for_tile(tile_char)
+    }
+    
+    // New method to draw a sprite for a tile
+    pub fn draw_sprite_for_tile(&self, painter: &egui::Painter, rect: egui::Rect, tile_char: char) -> bool {
+        self.celeste_assets.draw_sprite_for_tile(painter, rect, tile_char)
     }
 
     pub fn extract_level_names(&mut self) {
