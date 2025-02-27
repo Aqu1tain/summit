@@ -1,0 +1,16 @@
+[package]
+name = "summit"
+version = "0.1.0-dev"
+description = "Summit is a pre-release Celeste map editor, currently in development."
+license = "MIT"
+edition = "2021"
+authors = ["Akitain"]
+
+[dependencies]
+eframe = "0.17.0"
+egui = "0.17.0"
+dirs = "4.0.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rfd = "0.8.0"  # Simple file dialog library
+cairn = { git = "https://github.com/Aqu1tain/cairn.git", tag = "v0.1.0" }
