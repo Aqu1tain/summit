@@ -71,6 +71,7 @@ summit/
 
 - [Cairn](https://github.com/Aqu1tain/cairn) - Celeste Map Encoder/Decoder
 - [egui](https://github.com/emilk/egui) - Immediate mode GUI library for Rust
+- [Loenn](https://github.com/CelestialCartographers/Loenn) - Map editor made in Julia for the inspiration
 
 ## License
 
