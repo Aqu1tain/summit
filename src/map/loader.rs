@@ -1,3 +1,4 @@
+use cairn::bin_to_json;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
@@ -13,47 +14,32 @@ pub fn get_temp_json_path(bin_path: &str) -> String {
     temp_dir.join(format!("{}_temp.json", stem)).to_string_lossy().to_string()
 }
 
-/// Load a map from a binary file into the editor
 pub fn load_map(editor: &mut CelesteMapEditor, bin_path: &str) {
-    // Create a temporary JSON file path
     let temp_json_path = get_temp_json_path(bin_path);
-    
-    // Convert BIN to JSON using Cairn
-    match Command::new("cairn")
-        .args(&["bin2json", bin_path, &temp_json_path])
-        .status() 
-    {
-        Ok(status) => {
-            if !status.success() {
-                editor.error_message = Some(format!("Failed to convert BIN to JSON: Cairn exited with status {}", status));
-                return;
-            }
-        },
-        Err(e) => {
-            editor.error_message = Some(format!("Failed to execute Cairn command: {}", e));
-            return;
-        }
-    }
 
-    // Now load the JSON file
-    match File::open(&temp_json_path) {
-        Ok(file) => {
-            let reader = BufReader::new(file);
-            match serde_json::from_reader(reader) {
-                Ok(data) => {
-                    editor.map_data = Some(data);
-                    editor.bin_path = Some(bin_path.to_string());
-                    editor.temp_json_path = Some(temp_json_path);
-                    editor.extract_level_names();
-                    editor.error_message = None;
+    // Convert BIN to JSON using Cairn library
+    match bin_to_json(bin_path, &temp_json_path) {
+        Ok(_) => {
+            if let Ok(file) = File::open(&temp_json_path) {
+                let reader = BufReader::new(file);
+                match serde_json::from_reader(reader) {
+                    Ok(data) => {
+                        editor.map_data = Some(data);
+                        editor.bin_path = Some(bin_path.to_string());
+                        editor.temp_json_path = Some(temp_json_path);
+                        editor.extract_level_names();
+                        editor.error_message = None;
+                    }
+                    Err(e) => {
+                        editor.error_message = Some(format!("Failed to parse JSON: {}", e));
+                    }
                 }
-                Err(e) => {
-                    editor.error_message = Some(format!("Failed to parse JSON: {}", e));
-                }
+            } else {
+                editor.error_message = Some("Failed to open converted JSON file.".to_string());
             }
         }
         Err(e) => {
-            editor.error_message = Some(format!("Failed to open temporary JSON file: {}", e));
+            editor.error_message = Some(format!("Cairn failed: {}", e));
         }
     }
 }
