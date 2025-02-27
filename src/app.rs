@@ -1,19 +1,19 @@
-use eframe::{egui, epi};
-use egui::{Pos2, Vec2};
+use eframe::egui;
 use serde_json::Value;
 
 use crate::config::keybindings::KeyBindings;
 use crate::ui::render::render_app;
 use crate::ui::input::handle_input;
 use crate::ui::dialogs::{show_open_dialog, show_key_bindings_dialog};
+use crate::assets::CelesteAssets;
 
 pub struct CelesteMapEditor {
     pub map_data: Option<Value>,
     pub current_level_index: usize,
-    pub camera_pos: Vec2,
+    pub camera_pos: egui::Vec2,
     pub dragging: bool,
-    pub drag_start: Option<Pos2>,
-    pub mouse_pos: Pos2,
+    pub drag_start: Option<egui::Pos2>,
+    pub mouse_pos: egui::Pos2,
     pub bin_path: Option<String>,
     pub temp_json_path: Option<String>,
     pub show_open_dialog: bool,
@@ -25,6 +25,9 @@ pub struct CelesteMapEditor {
     pub show_labels: bool,
     pub key_bindings: KeyBindings,
     pub show_key_bindings_dialog: bool,
+    pub celeste_assets: CelesteAssets,
+    pub show_celeste_path_dialog: bool,
+    pub use_textures: bool,
 }
 
 impl Default for CelesteMapEditor {
@@ -32,10 +35,10 @@ impl Default for CelesteMapEditor {
         Self {
             map_data: None,
             current_level_index: 0,
-            camera_pos: Vec2::new(0.0, 0.0),
+            camera_pos: egui::Vec2::new(0.0, 0.0),
             dragging: false,
             drag_start: None,
-            mouse_pos: Pos2::new(0.0, 0.0),
+            mouse_pos: egui::Pos2::new(0.0, 0.0),
             bin_path: None,
             temp_json_path: None,
             show_open_dialog: false,
@@ -47,14 +50,24 @@ impl Default for CelesteMapEditor {
             show_labels: true,
             key_bindings: KeyBindings::default(),
             show_key_bindings_dialog: false,
+            celeste_assets: CelesteAssets::new(),
+            show_celeste_path_dialog: false,
+            use_textures: true,
         }
     }
 }
 
 impl CelesteMapEditor {
-    pub fn new() -> Self {
+    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+        // Customize egui here with cc.egui_ctx.set_fonts and cc.egui_ctx.set_visuals.
         let mut editor = Self::default();
         editor.key_bindings.load();
+        
+        // Check if Celeste assets are available, show dialog if not
+        if editor.celeste_assets.celeste_dir.is_none() {
+            editor.show_celeste_path_dialog = true;
+        }
+        
         editor
     }
 
@@ -114,7 +127,7 @@ impl CelesteMapEditor {
         }
     }
 
-    pub fn screen_to_map(&self, pos: Pos2) -> (i32, i32) {
+    pub fn screen_to_map(&self, pos: egui::Pos2) -> (i32, i32) {
         let scaled_tile_size = crate::ui::render::TILE_SIZE * self.zoom_level;
         let x = ((pos.x + self.camera_pos.x) / scaled_tile_size).floor() as i32;
         let y = ((pos.y + self.camera_pos.y) / scaled_tile_size).floor() as i32;
@@ -122,12 +135,8 @@ impl CelesteMapEditor {
     }
 }
 
-impl epi::App for CelesteMapEditor {
-    fn name(&self) -> &str {
-        "Summit - Celeste Map Editor"
-    }
-
-    fn update(&mut self, ctx: &egui::Context, _frame: &epi::Frame) {
+impl eframe::App for CelesteMapEditor {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Handle user input
         handle_input(self, ctx);
         
@@ -141,6 +150,11 @@ impl epi::App for CelesteMapEditor {
         
         if self.show_key_bindings_dialog {
             show_key_bindings_dialog(self, ctx);
+        }
+        
+        if self.show_celeste_path_dialog {
+            // We need to implement or import this function
+            // show_celeste_path_dialog(self, ctx);
         }
     }
 }

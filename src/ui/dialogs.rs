@@ -1,5 +1,4 @@
 use eframe::egui;
-use egui::Layout;
 
 use crate::app::CelesteMapEditor;
 use crate::config::keybindings::{BindingType, InputBinding, InputMode, KeyBindings};
@@ -68,7 +67,7 @@ pub fn show_key_bindings_dialog(editor: &mut CelesteMapEditor, ctx: &egui::Conte
                     editor.key_bindings = KeyBindings::default();
                 }
                 
-                ui.with_layout(Layout::right_to_left(), |ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Save & Close").clicked() {
                         editor.key_bindings.save();
                         editor.show_key_bindings_dialog = false;
@@ -153,4 +152,57 @@ fn render_binding_selector(editor: &mut CelesteMapEditor, ui: &mut egui::Ui, lab
             },
         }
     });
+}
+
+pub fn show_celeste_path_dialog(editor: &mut CelesteMapEditor, ctx: &egui::Context) {
+    egui::Window::new("Celeste Installation Path")
+        .collapsible(false)
+        .resizable(false)
+        .show(ctx, |ui| {
+            ui.heading("Celeste Installation Path");
+            ui.add_space(10.0);
+            
+            if editor.celeste_assets.celeste_dir.is_none() {
+                ui.label("Celeste installation not found!");
+                ui.label("Please specify the path to your Celeste installation folder.");
+                ui.label("This is needed to load textures for the map editor.");
+            } else {
+                ui.label("Current Celeste installation path:");
+                ui.label(editor.celeste_assets.celeste_dir.as_ref().unwrap().display().to_string());
+                ui.label("You can change the path if needed.");
+            }
+            
+            ui.add_space(10.0);
+                
+            ui.horizontal(|ui| {
+                if ui.button("Browse...").clicked() {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .set_title("Select Celeste Installation Folder")
+                        .pick_folder() {
+                        if !editor.celeste_assets.set_celeste_dir(&path) {
+                            editor.error_message = Some("Invalid Celeste installation directory.".to_string());
+                        }
+                    }
+                }
+                
+                ui.checkbox(&mut editor.use_textures, "Use textures when available");
+            });
+            
+            ui.add_space(10.0);
+            
+            let is_valid = editor.celeste_assets.celeste_dir.is_some();
+            
+            ui.horizontal(|ui| {
+                if ui.button("Continue Without Textures").clicked() {
+                    editor.use_textures = false;
+                    editor.show_celeste_path_dialog = false;
+                }
+                
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.add_enabled(is_valid, egui::Button::new("OK")).clicked() {
+                        editor.show_celeste_path_dialog = false;
+                    }
+                });
+            });
+        });
 }

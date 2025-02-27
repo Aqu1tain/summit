@@ -4,7 +4,35 @@ use egui::{Color32, FontId, Pos2, Rect, Sense, Stroke, Vec2};
 use crate::app::CelesteMapEditor;
 use crate::map::loader::{save_map, save_map_as};
 
-fn render_current_room(editor: &CelesteMapEditor, painter: &egui::Painter, scaled_tile_size: f32) {
+// Helper function to draw a textured rectangle using a mesh.
+fn draw_texture(painter: &egui::Painter, rect: Rect, texture_id: egui::TextureId, tint: Color32) {
+    let uv_rect = Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0));
+    let mut mesh = egui::epaint::Mesh::with_texture(texture_id);
+    mesh.vertices.push(egui::epaint::Vertex {
+        pos: rect.min,
+        uv: uv_rect.min,
+        color: tint,
+    });
+    mesh.vertices.push(egui::epaint::Vertex {
+        pos: Pos2::new(rect.max.x, rect.min.y),
+        uv: Pos2::new(uv_rect.max.x, uv_rect.min.y),
+        color: tint,
+    });
+    mesh.vertices.push(egui::epaint::Vertex {
+        pos: rect.max,
+        uv: uv_rect.max,
+        color: tint,
+    });
+    mesh.vertices.push(egui::epaint::Vertex {
+        pos: Pos2::new(rect.min.x, rect.max.y),
+        uv: Pos2::new(uv_rect.min.x, uv_rect.max.y),
+        color: tint,
+    });
+    mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
+    painter.add(egui::epaint::Shape::mesh(mesh));
+}
+
+fn render_current_room(editor: &mut CelesteMapEditor, painter: &egui::Painter, scaled_tile_size: f32, ctx: &egui::Context) {
     // Draw only current room
     if let Some(solids) = editor.get_solids_data() {
         for (y, line) in solids.lines().enumerate() {
@@ -18,20 +46,36 @@ fn render_current_room(editor: &CelesteMapEditor, painter: &egui::Painter, scale
                         Vec2::new(scaled_tile_size, scaled_tile_size),
                     );
                     
-                    // Pick a color based on the character
-                    let color = match c {
-                        '9' => Color32::from_rgb(255, 255, 255),
-                        'm' => Color32::from_rgb(150, 100, 50),
-                        'n' => Color32::from_rgb(50, 150, 100),
-                        'a' => Color32::from_rgb(150, 50, 150),
-                        _ => SOLID_TILE_COLOR,
-                    };
+                    let mut used_texture = false;
                     
-                    painter.rect_filled(rect, 0.0, color);
+                    // Use textures if enabled and available
+                    if editor.use_textures {
+                        if let Some(texture_path) = editor.celeste_assets.get_texture_path_for_tile(c) {
+                            if let Some(texture_handle) = editor.celeste_assets.load_texture(texture_path, ctx) {
+                                // Draw the texture using our helper
+                                draw_texture(painter, rect, texture_handle.id(), Color32::WHITE);
+                                used_texture = true;
+                            }
+                        }
+                    }
                     
-                    // Only draw stroke for larger zoom levels
-                    if editor.zoom_level > 0.5 {
-                        painter.rect_stroke(rect, 0.0, Stroke::new(1.0, Color32::from_rgb(0, 0, 0)));
+                    // Fall back to colored rectangle if no texture was used
+                    if !used_texture {
+                        // Pick a color based on the character
+                        let color = match c {
+                            '9' => Color32::from_rgb(255, 255, 255),
+                            'm' => Color32::from_rgb(150, 100, 50),
+                            'n' => Color32::from_rgb(50, 150, 100),
+                            'a' => Color32::from_rgb(150, 50, 150),
+                            _ => SOLID_TILE_COLOR,
+                        };
+                        
+                        painter.rect_filled(rect, 0.0, color);
+                        
+                        // Only draw stroke for larger zoom levels
+                        if editor.zoom_level > 0.5 {
+                            painter.rect_stroke(rect, 0.0, Stroke::new(1.0, Color32::from_rgb(0, 0, 0)));
+                        }
                     }
                 }
             }
@@ -39,10 +83,12 @@ fn render_current_room(editor: &CelesteMapEditor, painter: &egui::Painter, scale
     }
 }
 
-fn render_all_rooms(editor: &CelesteMapEditor, painter: &egui::Painter, scaled_tile_size: f32, _response: &egui::Response) {
-    // Draw all rooms in two phases to ensure selected room is on top
+fn render_all_rooms(editor: &mut CelesteMapEditor, painter: &egui::Painter, scaled_tile_size: f32, _response: &egui::Response, ctx: &egui::Context) {
+    // On clone le tableau des niveaux pour éviter les conflits d'emprunts.
     if let Some(map) = &editor.map_data {
-        if let Some(levels) = map["__children"][0]["__children"].as_array() {
+        if let Some(levels_array) = map["__children"][0]["__children"].as_array() {
+            let levels = levels_array.clone();
+            
             // Phase 1: Draw non-selected rooms first
             for (i, level) in levels.iter().enumerate() {
                 // Skip the currently selected room in this phase
@@ -51,7 +97,7 @@ fn render_all_rooms(editor: &CelesteMapEditor, painter: &egui::Painter, scaled_t
                 }
                 
                 if level["__name"] == "level" {
-                    render_room(editor, painter, level, i, scaled_tile_size, false);
+                    render_room(editor, painter, level, i, scaled_tile_size, false, ctx);
                 }
             }
             
@@ -59,32 +105,32 @@ fn render_all_rooms(editor: &CelesteMapEditor, painter: &egui::Painter, scaled_t
             if editor.current_level_index < levels.len() {
                 let level = &levels[editor.current_level_index];
                 if level["__name"] == "level" {
-                    render_room(editor, painter, level, editor.current_level_index, scaled_tile_size, true);
+                    render_room(editor, painter, level, editor.current_level_index, scaled_tile_size, true, ctx);
                 }
             }
         }
     }
 }
 
-fn render_room(editor: &CelesteMapEditor, painter: &egui::Painter, level: &serde_json::Value, 
-               _index: usize, scaled_tile_size: f32, is_selected: bool) {
+fn render_room(editor: &mut CelesteMapEditor, painter: &egui::Painter, level: &serde_json::Value, 
+    _index: usize, scaled_tile_size: f32, is_selected: bool, ctx: &egui::Context) {
     if let (Some(room_x), Some(room_y)) = (level["x"].as_f64(), level["y"].as_f64()) {
         // Convert room coordinates from pixels to tiles
         let room_x_tiles = room_x / 8.0;
         let room_y_tiles = room_y / 8.0;
-        
+    
         // Convert pixel sizes to tile counts (divide by 8)
         let room_width_pixels = level.get("width").and_then(|w| w.as_f64()).unwrap_or(320.0);
         let room_height_pixels = level.get("height").and_then(|h| h.as_f64()).unwrap_or(184.0);
-        
+    
         // Convert to tile counts (1 tile = 8 pixels in Celeste)
         let room_width = (room_width_pixels / 8.0).ceil();
         let room_height = (room_height_pixels / 8.0).ceil();
-        
+    
         // Calculate actual boundaries based on solids content
         let mut max_width = 0;
         let mut max_height = 0;
-        
+    
         // Get solids content to determine actual room size
         if let Some(children) = level["__children"].as_array() {
             for child in children {
@@ -98,11 +144,11 @@ fn render_room(editor: &CelesteMapEditor, painter: &egui::Painter, level: &serde
                 }
             }
         }
-        
+    
         // Use the larger of declared size and content size
         let effective_width = (room_width as usize).max(max_width);
         let effective_height = (room_height as usize).max(max_height);
-        
+    
         // Draw room boundary
         let room_rect = Rect::from_min_size(
             Pos2::new(
@@ -114,14 +160,14 @@ fn render_room(editor: &CelesteMapEditor, painter: &egui::Painter, level: &serde
                 effective_height as f32 * scaled_tile_size,
             ),
         );
-        
+    
         // Choose boundary color based on selected status
         let boundary_color = if is_selected {
             Color32::from_rgb(100, 200, 100) // Green for selected
         } else {
             Color32::from_rgb(200, 100, 100) // Red for non-selected
         };
-        
+    
         // Get solids for this room
         if let Some(children) = level["__children"].as_array() {
             for child in children {
@@ -138,20 +184,36 @@ fn render_room(editor: &CelesteMapEditor, painter: &egui::Painter, level: &serde
                                         Vec2::new(scaled_tile_size, scaled_tile_size),
                                     );
                                     
-                                    // Pick a color based on the character
-                                    let color = match c {
-                                        '9' => Color32::from_rgb(255, 255, 255),
-                                        'm' => Color32::from_rgb(150, 100, 50),
-                                        'n' => Color32::from_rgb(50, 150, 100),
-                                        'a' => Color32::from_rgb(150, 50, 150),
-                                        _ => SOLID_TILE_COLOR,
-                                    };
+                                    let mut used_texture = false;
                                     
-                                    painter.rect_filled(rect, 0.0, color);
+                                    // Use textures if enabled and available
+                                    if editor.use_textures {
+                                        if let Some(texture_path) = editor.celeste_assets.get_texture_path_for_tile(c) {
+                                            if let Some(texture_handle) = editor.celeste_assets.load_texture(texture_path, ctx) {
+                                                // Draw the texture using our helper function
+                                                draw_texture(painter, rect, texture_handle.id(), Color32::WHITE);
+                                                used_texture = true;
+                                            }
+                                        }
+                                    }
                                     
-                                    // Only draw stroke for larger zoom levels
-                                    if editor.zoom_level > 0.5 {
-                                        painter.rect_stroke(rect, 0.0, Stroke::new(1.0, Color32::from_rgb(0, 0, 0)));
+                                    // Fall back to colored rectangle if no texture was used
+                                    if !used_texture {
+                                        // Pick a color based on the character
+                                        let color = match c {
+                                            '9' => Color32::from_rgb(255, 255, 255),
+                                            'm' => Color32::from_rgb(150, 100, 50),
+                                            'n' => Color32::from_rgb(50, 150, 100),
+                                            'a' => Color32::from_rgb(150, 50, 150),
+                                            _ => SOLID_TILE_COLOR,
+                                        };
+                                        
+                                        painter.rect_filled(rect, 0.0, color);
+                                        
+                                        // Only draw stroke for larger zoom levels
+                                        if editor.zoom_level > 0.5 {
+                                            painter.rect_stroke(rect, 0.0, Stroke::new(1.0, Color32::from_rgb(0, 0, 0)));
+                                        }
                                     }
                                 }
                             }
@@ -161,10 +223,10 @@ fn render_room(editor: &CelesteMapEditor, painter: &egui::Painter, level: &serde
                 }
             }
         }
-        
+    
         // Draw the room boundary
         painter.rect_stroke(room_rect, 0.0, Stroke::new(if is_selected { 3.0 } else { 2.0 }, boundary_color));
-        
+    
         // Draw room name
         if editor.show_labels {
             if let Some(name) = level["name"].as_str() {
@@ -175,7 +237,7 @@ fn render_room(editor: &CelesteMapEditor, painter: &egui::Painter, level: &serde
                     ),
                     egui::Align2::LEFT_TOP,
                     name,
-                    FontId::proportional(14.0), // Use FontId instead of TextStyle
+                    FontId::proportional(14.0),
                     Color32::WHITE,
                 );
             }
@@ -211,6 +273,12 @@ fn render_top_panel(editor: &mut CelesteMapEditor, ctx: &egui::Context) {
                     save_map_as(editor);
                     ui.close_menu();
                 }
+                ui.separator();
+                if ui.button("Set Celeste Path...").clicked() {
+                    editor.show_celeste_path_dialog = true;
+                    ui.close_menu();
+                }
+                ui.separator();
                 if ui.button("Quit").clicked() {
                     std::process::exit(0);
                 }
@@ -226,6 +294,7 @@ fn render_top_panel(editor: &mut CelesteMapEditor, ctx: &egui::Context) {
 
                 ui.checkbox(&mut editor.show_grid, "Show Grid");
                 ui.checkbox(&mut editor.show_labels, "Show Labels");
+                ui.checkbox(&mut editor.use_textures, "Use Textures");
 
                 ui.separator();
                 
@@ -251,7 +320,7 @@ fn render_top_panel(editor: &mut CelesteMapEditor, ctx: &egui::Context) {
                 if ui.button("Key Bindings...").clicked() {
                     editor.show_key_bindings_dialog = true;
                     ui.close_menu();
-                }                    
+                }
             });
             
             ui.separator();
@@ -285,7 +354,7 @@ fn render_bottom_panel(editor: &mut CelesteMapEditor, ctx: &egui::Context) {
             ui.label(format!("Tile: ({}, {})", tile_x, tile_y));
             
             if let Some(path) = &editor.bin_path {
-                ui.with_layout(egui::Layout::right_to_left(), |ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(format!("File: {}", path));
                 });
             }
@@ -341,9 +410,9 @@ fn render_central_panel(editor: &mut CelesteMapEditor, ctx: &egui::Context) {
         }
         
         if editor.show_all_rooms {
-            render_all_rooms(editor, &painter, scaled_tile_size, &response);
+            render_all_rooms(editor, &painter, scaled_tile_size, &response, ctx);
         } else {
-            render_current_room(editor, &painter, scaled_tile_size);
+            render_current_room(editor, &painter, scaled_tile_size, ctx);
         }
     });
 }

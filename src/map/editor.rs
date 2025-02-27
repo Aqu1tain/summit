@@ -1,4 +1,4 @@
-use egui::Pos2;
+use eframe::egui::Pos2;
 use crate::app::CelesteMapEditor;
 
 pub fn place_block(editor: &mut CelesteMapEditor, pos: Pos2) {

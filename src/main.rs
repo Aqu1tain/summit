@@ -4,9 +4,13 @@ mod app;
 mod map;
 mod ui;
 mod config;
+mod assets;
 
 fn main() {
-    let app = app::CelesteMapEditor::new();
-    let native_options = eframe::NativeOptions::default();
-    eframe::run_native(Box::new(app), native_options);
+    let options = eframe::NativeOptions::default();
+    eframe::run_native(
+        "Summit - Celeste Map Editor",
+        options,
+        Box::new(|cc| Box::new(app::CelesteMapEditor::new(cc))),
+    );
 }
