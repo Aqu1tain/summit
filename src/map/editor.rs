@@ -75,26 +75,52 @@ pub fn place_block_in_current_room(editor: &mut CelesteMapEditor, pos: Pos2) {
         }
     }
 
-    // Proceed with placing the block if within boundaries
+    // Get solids data
     if let Some(solids) = editor.get_solids_data() {
+        // Get offsets from the solids element
+        let mut offset_x = 0;
+        let mut offset_y = 0;
+
+        if let Some(level) = editor.get_current_level() {
+            if let Some(children) = level["__children"].as_array() {
+                for child in children {
+                    if child["__name"] == "solids" {
+                        offset_x = child["offsetX"].as_i64().unwrap_or(0) as i32;
+                        offset_y = child["offsetY"].as_i64().unwrap_or(0) as i32;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Adjust tile position for offsets
+        let adjusted_x = tile_x - offset_x;
+        let adjusted_y = tile_y - offset_y;
+
+        // Skip if position would be negative after adjustment
+        if adjusted_x < 0 || adjusted_y < 0 {
+            println!("Cannot place block at negative position after offset adjustment");
+            return;
+        }
+
         let mut rows: Vec<String> = solids.split('\n').map(|s| s.to_string()).collect();
 
         // Ensure we have enough rows
-        while rows.len() <= tile_y as usize {
+        while rows.len() <= adjusted_y as usize {
             rows.push(String::new());
         }
 
         // Ensure the row is long enough
-        let row = &mut rows[tile_y as usize];
-        while row.len() <= tile_x as usize {
+        let row = &mut rows[adjusted_y as usize];
+        while row.len() <= adjusted_x as usize {
             row.push('0');
         }
 
-        // Place a solid tile ('9' = solid block)
-        if let Some(_c) = row.chars().nth(tile_x as usize) {
+        // Place a solid tile (use '9' or appropriate character based on map type)
+        if let Some(_c) = row.chars().nth(adjusted_x as usize) {
             let mut new_row = row.clone();
-            new_row.replace_range(tile_x as usize..tile_x as usize + 1, "9");
-            rows[tile_y as usize] = new_row;
+            new_row.replace_range(adjusted_x as usize..adjusted_x as usize + 1, "9");
+            rows[adjusted_y as usize] = new_row;
 
             // Update the map data
             let new_solids = rows.join("\n");
@@ -102,6 +128,7 @@ pub fn place_block_in_current_room(editor: &mut CelesteMapEditor, pos: Pos2) {
         }
     }
 }
+
 
 pub fn remove_block(editor: &mut CelesteMapEditor, pos: Pos2) {
     // If in "all rooms" mode, determine which room was clicked
@@ -148,19 +175,45 @@ pub fn remove_block(editor: &mut CelesteMapEditor, pos: Pos2) {
 
 pub fn remove_block_in_current_room(editor: &mut CelesteMapEditor, pos: Pos2) {
     let (tile_x, tile_y) = editor.screen_to_map(pos);
-    
+
+    // Get solids data
     if let Some(solids) = editor.get_solids_data() {
+        // Get offsets from the solids element
+        let mut offset_x = 0;
+        let mut offset_y = 0;
+
+        if let Some(level) = editor.get_current_level() {
+            if let Some(children) = level["__children"].as_array() {
+                for child in children {
+                    if child["__name"] == "solids" {
+                        offset_x = child["offsetX"].as_i64().unwrap_or(0) as i32;
+                        offset_y = child["offsetY"].as_i64().unwrap_or(0) as i32;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Adjust tile position for offsets
+        let adjusted_x = tile_x - offset_x;
+        let adjusted_y = tile_y - offset_y;
+
+        // Skip if position would be negative after adjustment
+        if adjusted_x < 0 || adjusted_y < 0 {
+            return;
+        }
+
         let mut rows: Vec<String> = solids.split('\n').map(|s| s.to_string()).collect();
-        
+
         // Check if tile coordinates are valid
-        if tile_y >= 0 && tile_y < rows.len() as i32 {
-            let row = &mut rows[tile_y as usize];
-            if tile_x >= 0 && tile_x < row.len() as i32 {
+        if adjusted_y >= 0 && adjusted_y < rows.len() as i32 {
+            let row = &mut rows[adjusted_y as usize];
+            if adjusted_x >= 0 && adjusted_x < row.len() as i32 {
                 // Replace with an empty tile ('0')
                 let mut new_row = row.clone();
-                new_row.replace_range(tile_x as usize..tile_x as usize + 1, "0");
-                rows[tile_y as usize] = new_row;
-                
+                new_row.replace_range(adjusted_x as usize..adjusted_x as usize + 1, "0");
+                rows[adjusted_y as usize] = new_row;
+
                 // Update the map data
                 let new_solids = rows.join("\n");
                 editor.update_solids_data(&new_solids);

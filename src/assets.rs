@@ -191,10 +191,23 @@ impl CelesteAssets {
     /// Get the appropriate texture path for a tile character
     pub fn get_texture_path_for_tile(&self, tile_char: char) -> Option<&'static str> {
         match tile_char {
-            '9' => Some("tilesSolid.png"),  // Main solid tiles texture
-            'm' => Some("mountainTiles.png"), // Mountain tiles
-            'n' => Some("templeTiles.png"),   // Temple tiles
-            'a' => Some("coreTiles.png"),     // Core (alt) tiles
+            // Modded map tiles
+            '9' => Some("tilesSolid.png"),     // Main solid tiles texture
+            'm' => Some("mountainTiles.png"),  // Mountain tiles
+            'n' => Some("templeTiles.png"),    // Temple tiles
+            'a' => Some("coreTiles.png"),      // Core (alt) tiles
+
+            // Base game tiles
+            '1' => Some("tilesSolid.png"),     // Standard solid tile
+            '3' => Some("tilesSolid.png"),     // Another standard solid tile
+            '4' => Some("tilesSolid.png"),     // Yet another standard solid tile
+            '7' => Some("tilesSolid.png"),     // And another standard solid tile
+
+            // Additional tiles
+            'b' => Some("reflectionTiles.png"), // Reflection tiles
+            'c' => Some("moonTiles.png"),       // Moon tiles
+            'd' => Some("dreamTiles.png"),      // Dream tiles
+
             _ => None
         }
     }

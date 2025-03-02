@@ -15,5 +15,5 @@ serde_json = "1.0"
 rfd = "0.10.0"  # Simple file dialog library
 image = "0.24.2"
 shellexpand = "2.1.0"
-cairn = { git = "https://github.com/Aqu1tain/cairn.git", tag = "v0.1.0" }
+cairn = { git = "https://github.com/Aqu1tain/cairn.git" }
 byteorder = "1.4"

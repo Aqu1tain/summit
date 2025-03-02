@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
 use std::io::Write;
+use eframe::egui::Vec2;
 
 use crate::app::CelesteMapEditor;
 
@@ -16,29 +17,49 @@ pub fn get_temp_json_path(bin_path: &str) -> String {
 
 pub fn load_map(editor: &mut CelesteMapEditor, bin_path: &str) {
     let temp_json_path = get_temp_json_path(bin_path);
+    println!("Loading map: {}", bin_path);
+    println!("Temp JSON path: {}", temp_json_path);
 
     // Convert BIN to JSON using Cairn library
     match bin_to_json(bin_path, &temp_json_path) {
         Ok(_) => {
+            println!("Successfully converted bin to json");
             if let Ok(file) = File::open(&temp_json_path) {
                 let reader = BufReader::new(file);
                 match serde_json::from_reader(reader) {
                     Ok(data) => {
+                        println!("Successfully parsed JSON data");
                         editor.map_data = Some(data);
                         editor.bin_path = Some(bin_path.to_string());
                         editor.temp_json_path = Some(temp_json_path);
+
+                        // Debug the map structure
+                        editor.debug_map_structure();
+
+                        // Extract level names
                         editor.extract_level_names();
+
+                        // Reset current level to the first one
+                        editor.current_level_index = 0;
+
+                        // Reset camera position
+                        editor.camera_pos = Vec2::new(0.0, 0.0);
+
+                        println!("Map loaded successfully with {} levels", editor.level_names.len());
                         editor.error_message = None;
                     }
                     Err(e) => {
+                        println!("Failed to parse JSON: {}", e);
                         editor.error_message = Some(format!("Failed to parse JSON: {}", e));
                     }
                 }
             } else {
+                println!("Failed to open converted JSON file");
                 editor.error_message = Some("Failed to open converted JSON file.".to_string());
             }
         }
         Err(e) => {
+            println!("Cairn conversion failed: {}", e);
             editor.error_message = Some(format!("Cairn failed: {}", e));
         }
     }
