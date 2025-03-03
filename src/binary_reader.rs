@@ -4,7 +4,7 @@ use byteorder::{LittleEndian, ReadBytesExt};
 
 /// A helper for reading Celeste's binary formats
 pub struct BinaryReader<R: Read + Seek> {
-    pub reader: R,  // Making reader public to fix access errors
+    reader: R,  // Changed to private for better encapsulation
 }
 
 impl<R: Read + Seek> BinaryReader<R> {
@@ -52,7 +52,7 @@ impl<R: Read + Seek> BinaryReader<R> {
         let length = self.reader.read_u8()? as usize;
         let mut buffer = vec![0u8; length];
         self.reader.read_exact(&mut buffer)?;
-        
+
         String::from_utf8(buffer)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
@@ -72,5 +72,17 @@ impl<R: Read + Seek> BinaryReader<R> {
     pub fn set_position(&mut self, pos: u64) -> io::Result<()> {
         self.reader.seek(SeekFrom::Start(pos))?;
         Ok(())
+    }
+
+    /// Read a fixed number of bytes
+    pub fn read_bytes(&mut self, count: usize) -> io::Result<Vec<u8>> {
+        let mut buffer = vec![0u8; count];
+        self.reader.read_exact(&mut buffer)?;
+        Ok(buffer)
+    }
+
+    /// Access the internal reader (added to fix access without making reader public)
+    pub fn get_reader_mut(&mut self) -> &mut R {
+        &mut self.reader
     }
 }
