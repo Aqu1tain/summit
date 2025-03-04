@@ -4,7 +4,7 @@ use serde_json::Value;
 use crate::config::keybindings::KeyBindings;
 use crate::ui::render::render_app;
 use crate::ui::input::handle_input;
-use crate::ui::dialogs::{show_open_dialog, show_key_bindings_dialog};
+use crate::ui::dialogs::{show_open_dialog, show_key_bindings_dialog, show_celeste_path_dialog};
 use crate::assets::CelesteAssets;
 
 /// Cached representation of a room’s layout.
@@ -347,7 +347,7 @@ impl eframe::App for CelesteMapEditor {
         }
         // If needed, show the Celeste path dialog.
         if self.show_celeste_path_dialog {
-            // Call your dialog for Celeste installation path here.
+            show_celeste_path_dialog(self, ctx);
         }
     }
 }
