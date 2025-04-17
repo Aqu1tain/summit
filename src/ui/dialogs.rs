@@ -17,9 +17,31 @@ pub fn show_open_dialog(editor: &mut CelesteMapEditor, ctx: &egui::Context) {
                 }
 
                 if ui.button("Browse...").clicked() {
-                    if let Some(path) = rfd::FileDialog::new()
-                        .add_filter("Celeste Map", &["bin"])
-                        .pick_file() {
+                    let mut dialog = rfd::FileDialog::new();
+                    dialog = dialog.add_filter("Celeste Map", &["bin"]);
+                    // Set default directory to maps directory if available
+                    #[cfg(target_os = "macos")]
+                    {
+                        use std::path::PathBuf;
+                        let default_maps_dir = PathBuf::from("~/Library/Application Support/Celeste/Maps");
+                        let expanded_maps_dir = shellexpand::tilde(default_maps_dir.to_str().unwrap()).to_string();
+                        dialog = dialog.set_directory(expanded_maps_dir);
+                    }
+                    #[cfg(target_os = "windows")]
+                    {
+                        use std::path::PathBuf;
+                        let default_maps_dir = PathBuf::from(r"%APPDATA%/Celeste/Maps");
+                        let expanded_maps_dir = shellexpand::env(default_maps_dir.to_str().unwrap()).unwrap_or_else(|_| std::borrow::Cow::Borrowed(default_maps_dir.to_str().unwrap())).to_string();
+                        dialog = dialog.set_directory(expanded_maps_dir);
+                    }
+                    #[cfg(target_os = "linux")]
+                    {
+                        use std::path::PathBuf;
+                        let default_maps_dir = PathBuf::from("~/.local/share/Celeste/Maps");
+                        let expanded_maps_dir = shellexpand::tilde(default_maps_dir.to_str().unwrap()).to_string();
+                        dialog = dialog.set_directory(expanded_maps_dir);
+                    }
+                    if let Some(path) = dialog.pick_file() {
                         editor.bin_path = Some(path.display().to_string());
                     }
                 }
