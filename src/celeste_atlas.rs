@@ -1,7 +1,7 @@
 // src/celeste_atlas.rs
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{self, Read};
+use std::io::{self, Read, Seek};
 use std::path::Path;
 use byteorder::{LittleEndian, ReadBytesExt};
 use eframe::egui;
@@ -198,77 +198,62 @@ impl AtlasManager {
     }
 
     /// Load a Celeste .data file which contains a run-length encoded image
-    fn load_data_file(&self, data_path: &Path) -> io::Result<RgbaImage> {
+    pub fn load_data_file(&self, data_path: &Path) -> io::Result<RgbaImage> {
+        use std::io::Read;
+        println!("[AtlasManager::load_data_file] Attempting to open .data file: {}", data_path.display());
         let mut file = File::open(data_path)?;
 
-        // Read image dimensions and alpha flag
+        // Read header: width (i32), height (i32), has_alpha (u8)
         let width = file.read_i32::<LittleEndian>()? as u32;
         let height = file.read_i32::<LittleEndian>()? as u32;
         let has_alpha = file.read_u8()? != 0;
+        println!("[AtlasManager::load_data_file] width: {width}, height: {height}, has_alpha: {has_alpha}");
 
-        // Create image buffer
-        let mut image = RgbaImage::new(width, height);
+        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+        let mut total_pixels = 0u32;
 
-        // Track RLE state
-        let mut repeats_left = 0;
+        let mut repeats_left = 0u8;
         let mut r = 0u8;
         let mut g = 0u8;
         let mut b = 0u8;
         let mut a = 255u8;
 
-        // Fixed RLE decoding for proper boundary checking
-        for y in 0..height {
-            // Reset repeats at start of each row for safety
-            repeats_left = 0;
-
-            for x in 0..width {
-                if repeats_left == 0 {
-                    // Read new pixel and repeat count
-                    let rep = file.read_u8()?;
-                    // Fix: ensure rep is at least 1
-                    repeats_left = if rep > 0 { rep - 1 } else { 0 };
-
-                    if has_alpha {
-                        let alpha = file.read_u8()?;
-
-                        if alpha > 0 {
-                            a = alpha;
-                            // Celeste stores BGR, we need RGB
-                            b = file.read_u8()?;
-                            g = file.read_u8()?;
-                            r = file.read_u8()?;
-
-                            // Fixed alpha un-premultiplication with proper bounds checking
-                            if alpha < 255 && alpha > 0 {
-                                let alpha_f = alpha as f32 / 255.0;
-                                // Prevent division by zero and clamping to valid range
-                                r = ((r as f32 / alpha_f).min(255.0).max(0.0)) as u8;
-                                g = ((g as f32 / alpha_f).min(255.0).max(0.0)) as u8;
-                                b = ((b as f32 / alpha_f).min(255.0).max(0.0)) as u8;
-                            }
-                        } else {
-                            r = 0;
-                            g = 0;
-                            b = 0;
-                            a = 0;
-                        }
-                    } else {
-                        // No alpha channel
+        while total_pixels < width * height {
+            if repeats_left == 0 {
+                let rep = file.read_u8()?;
+                repeats_left = rep;
+                if has_alpha {
+                    let alpha = file.read_u8()?;
+                    if alpha > 0 {
                         b = file.read_u8()?;
                         g = file.read_u8()?;
                         r = file.read_u8()?;
-                        a = 255;
+                        a = alpha;
+                    } else {
+                        r = 0;
+                        g = 0;
+                        b = 0;
+                        a = 0;
                     }
-
-                    image.put_pixel(x, y, image::Rgba([r, g, b, a]));
                 } else {
-                    // Repeat the previous pixel
-                    image.put_pixel(x, y, image::Rgba([r, g, b, a]));
-                    repeats_left -= 1;
+                    b = file.read_u8()?;
+                    g = file.read_u8()?;
+                    r = file.read_u8()?;
+                    a = 255;
                 }
             }
+            // Write pixel
+            pixels.push(r);
+            pixels.push(g);
+            pixels.push(b);
+            pixels.push(a);
+            repeats_left -= 1;
+            total_pixels += 1;
         }
 
+        println!("[AtlasManager::load_data_file] Finished decoding. Total pixels: {}", pixels.len() / 4);
+        let image = RgbaImage::from_vec(width, height, pixels)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "failed to create image from buffer"))?;
         Ok(image)
     }
 

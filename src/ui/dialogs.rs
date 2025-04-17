@@ -19,33 +19,58 @@ pub fn show_open_dialog(editor: &mut CelesteMapEditor, ctx: &egui::Context) {
                 if ui.button("Browse...").clicked() {
                     let mut dialog = rfd::FileDialog::new();
                     dialog = dialog.add_filter("Celeste Map", &["bin"]);
-                    // Set default directory to maps directory if available
-                    #[cfg(target_os = "macos")]
-                    {
-                        use std::path::PathBuf;
-                        let default_maps_dir = PathBuf::from("~/Library/Application Support/Celeste/Maps");
-                        let expanded_maps_dir = shellexpand::tilde(default_maps_dir.to_str().unwrap()).to_string();
-                        dialog = dialog.set_directory(expanded_maps_dir);
+                    let mut fallback_to_home = true;
+                    let mut maps_path_str = String::new();
+                    if let Some(celeste_dir) = &editor.celeste_assets.celeste_dir {
+                        #[cfg(target_os = "macos")]
+                        {
+                            let maps_path = celeste_dir.join("Contents").join("Resources").join("Content").join("Maps");
+                            maps_path_str = maps_path.display().to_string();
+                            if maps_path.exists() {
+                                dialog = dialog.set_directory(&maps_path);
+                                fallback_to_home = false;
+                            }
+                        }
+                        #[cfg(any(target_os = "windows", target_os = "linux"))]
+                        {
+                            let maps_path = celeste_dir.join("Content").join("Maps");
+                            maps_path_str = maps_path.display().to_string();
+                            if maps_path.exists() {
+                                dialog = dialog.set_directory(&maps_path);
+                                fallback_to_home = false;
+                            }
+                        }
                     }
-                    #[cfg(target_os = "windows")]
-                    {
-                        use std::path::PathBuf;
-                        let default_maps_dir = PathBuf::from(r"%APPDATA%/Celeste/Maps");
-                        let expanded_maps_dir = shellexpand::env(default_maps_dir.to_str().unwrap()).unwrap_or_else(|_| std::borrow::Cow::Borrowed(default_maps_dir.to_str().unwrap())).to_string();
-                        dialog = dialog.set_directory(expanded_maps_dir);
-                    }
-                    #[cfg(target_os = "linux")]
-                    {
-                        use std::path::PathBuf;
-                        let default_maps_dir = PathBuf::from("~/.local/share/Celeste/Maps");
-                        let expanded_maps_dir = shellexpand::tilde(default_maps_dir.to_str().unwrap()).to_string();
-                        dialog = dialog.set_directory(expanded_maps_dir);
+                    if fallback_to_home {
+                        if let Some(home_dir) = dirs::home_dir() {
+                            dialog = dialog.set_directory(home_dir);
+                        }
                     }
                     if let Some(path) = dialog.pick_file() {
                         editor.bin_path = Some(path.display().to_string());
                     }
                 }
             });
+
+            #[cfg(target_os = "macos")]
+            if let Some(celeste_dir) = &editor.celeste_assets.celeste_dir {
+                let maps_path = celeste_dir.join("Contents").join("Resources").join("Content").join("Maps");
+                if !maps_path.exists() || !maps_path.starts_with(dirs::home_dir().unwrap_or_default()) {
+                    ui.add_space(10.0);
+                    ui.group(|ui| {
+                        ui.label(egui::RichText::new("Can't access Maps folder directly?").strong());
+                        ui.label("Use ⌘+Shift+G in the dialog and paste the path below:");
+                        ui.horizontal(|ui| {
+                            if ui.button(egui::RichText::new("Copy Maps Path").color(egui::Color32::from_rgb(0, 120, 255))).clicked() {
+                                ui.output().copied_text = maps_path.display().to_string();
+                            }
+                            ui.add(egui::TextEdit::singleline(&mut maps_path.display().to_string()).desired_width(300.0).font(egui::TextStyle::Monospace));
+                        });
+                        ui.add_space(5.0);
+                        ui.label(egui::RichText::new("⚠️  On some macOS versions, using ⌘+Shift+G may crash the app due to a bug in the file dialog library. If this happens, please navigate manually or update your app to the latest version.").color(egui::Color32::from_rgb(200, 50, 50)).size(13.0));
+                    });
+                }
+            }
 
             ui.horizontal(|ui| {
                 if ui.button("Cancel").clicked() {

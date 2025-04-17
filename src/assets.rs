@@ -169,11 +169,9 @@ impl CelesteAssets {
             // Extract the first character if it's a tileset identifier
             if let Some(first_char) = texture_path.chars().next() {
                 if let Some(sprite_path) = atlas_manager.get_texture_path_for_tile(first_char) {
-                    // Fix: Use sprite_path without extension to match atlas naming convention
+                    // Try to get the sprite from the atlas (for .data-based atlases)
                     if let Some(sprite) = atlas_manager.get_sprite("Gameplay", sprite_path) {
-                        // Extract the specific tile from the atlas
                         if let Some(image) = self.extract_sprite_image(sprite, atlas_manager) {
-                            // Convert to egui texture and cache it
                             let texture_handle = add_image_to_egui(ctx, &image, texture_path);
                             self.textures.insert(texture_path.to_string(), image);
                             self.texture_cache.insert(texture_path.to_string(), texture_handle);
@@ -184,9 +182,33 @@ impl CelesteAssets {
             }
         }
 
+        // Try to load from .data file directly if present (macOS/modern Celeste)
+        if let Some(celeste_dir) = &self.celeste_dir {
+            let data_path = celeste_dir
+                .join("Content")
+                .join("Graphics")
+                .join("Atlases")
+                .join("Gameplay")
+                .join(format!("{}.data", texture_path));
+            if data_path.exists() {
+                if let Some(atlas_manager) = &self.atlas_manager {
+                    match atlas_manager.load_data_file(&data_path) {
+                        Ok(image) => {
+                            let texture_handle = add_image_to_egui(ctx, &image, texture_path);
+                            self.textures.insert(texture_path.to_string(), image);
+                            self.texture_cache.insert(texture_path.to_string(), texture_handle);
+                            return self.texture_cache.get(texture_path);
+                        },
+                        Err(e) => {
+                            eprintln!("Failed to load .data texture {}: {}", data_path.display(), e);
+                        }
+                    }
+                }
+            }
+        }
+
         // Fall back to loading individual PNGs
         if let Some(celeste_dir) = &self.celeste_dir {
-            // Attempt to load the texture from the Celeste installation
             let full_path = celeste_dir
                 .join("Content")
                 .join("Graphics")
@@ -197,7 +219,6 @@ impl CelesteAssets {
             // For PNG files (pre-extracted assets)
             match load_texture_from_path(&full_path) {
                 Ok(image) => {
-                    // Convert image to egui texture
                     let texture_handle = add_image_to_egui(ctx, &image, texture_path);
                     self.textures.insert(texture_path.to_string(), image);
                     self.texture_cache.insert(texture_path.to_string(), texture_handle);
@@ -213,7 +234,6 @@ impl CelesteAssets {
             if xnb_path.exists() {
                 match crate::xnb_reader::extract_xnb_texture(&xnb_path) {
                     Ok(image) => {
-                        // Convert image to egui texture
                         let texture_handle = add_image_to_egui(ctx, &image, texture_path);
                         self.textures.insert(texture_path.to_string(), image);
                         self.texture_cache.insert(texture_path.to_string(), texture_handle);
@@ -329,6 +349,45 @@ impl CelesteAssets {
             }
         }
         false
+    }
+
+    /// Normalize user-selected Celeste path for best UX
+    pub fn normalize_celeste_dir(path: &std::path::Path) -> Option<std::path::PathBuf> {
+        #[cfg(target_os = "macos")]
+        {
+            use std::fs;
+            // If user selects a .app bundle, use Contents/Resources inside it
+            if path.extension().map_or(false, |ext| ext == "app") {
+                let res_path = path.join("Contents").join("Resources");
+                if res_path.exists() {
+                    return Some(res_path);
+                }
+            }
+            // If user selects a parent directory containing a .app, use that
+            if path.is_dir() {
+                if let Ok(entries) = fs::read_dir(path) {
+                    for entry in entries.flatten() {
+                        let entry_path = entry.path();
+                        if entry_path.extension().map_or(false, |ext| ext == "app") {
+                            let res_path = entry_path.join("Contents").join("Resources");
+                            if res_path.exists() {
+                                return Some(res_path);
+                            }
+                        }
+                    }
+                }
+            }
+            // If user selects Contents/Resources directly, use as-is if valid
+            if path.ends_with("Contents/Resources") && path.exists() {
+                return Some(path.to_path_buf());
+            }
+        }
+        // On other OSes, just use as-is
+        if path.exists() {
+            Some(path.to_path_buf())
+        } else {
+            None
+        }
     }
 }
 
