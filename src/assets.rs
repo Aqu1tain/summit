@@ -72,8 +72,16 @@ impl CelesteAssets {
             r"C:\Program Files\Epic Games\Celeste",
             r"C:\Program Files (x86)\GOG Galaxy\Games\Celeste",
 
-            // macOS paths (with expansion)
+            // macOS Steam paths
             "~/Library/Application Support/Steam/steamapps/common/Celeste",
+            "/Library/Application Support/Steam/steamapps/common/Celeste",
+            "/Users/Shared/Library/Application Support/Steam/steamapps/common/Celeste",
+            // macOS App Store or direct .app installs
+            "/Applications/Celeste.app/Contents/Resources",
+            "~/Applications/Celeste.app/Contents/Resources",
+            // macOS itch.io or other custom installs (user may select .app directly)
+            "/Applications/Celeste.app",
+            "~/Applications/Celeste.app",
 
             // Linux paths (with expansion)
             "~/.steam/steam/steamapps/common/Celeste",
@@ -84,10 +92,54 @@ impl CelesteAssets {
         for path_str in common_paths.iter() {
             let path_str = shellexpand::full(path_str).unwrap_or_else(|_| std::borrow::Cow::Borrowed(*path_str));
             let path = Path::new(path_str.as_ref());
+            println!("Checking Celeste path candidate: {}", path.display());
 
-            if path.exists() && Self::is_valid_celeste_dir(path) {
-                self.celeste_dir = Some(path.to_path_buf());
-                println!("Found Celeste installation at: {:?}", path);
+            // On macOS, if user selected a .app bundle, check Contents/Resources inside it
+            #[cfg(target_os = "macos")]
+            let candidate = if path.extension().map_or(false, |ext| ext == "app") {
+                let res_path = path.join("Contents").join("Resources");
+                println!("  Detected .app bundle, checking: {}", res_path.display());
+                if res_path.exists() && Self::is_valid_celeste_dir(&res_path) {
+                    Some(res_path)
+                } else {
+                    None
+                }
+            } else if path.exists() && Self::is_valid_celeste_dir(path) {
+                println!("  Directory exists and is valid");
+                Some(path.to_path_buf())
+            } else if path.is_dir() {
+                // Check for a .app bundle inside this directory
+                if let Ok(entries) = std::fs::read_dir(path) {
+                    for entry in entries.flatten() {
+                        let entry_path = entry.path();
+                        if entry_path.extension().map_or(false, |ext| ext == "app") {
+                            let res_path = entry_path.join("Contents").join("Resources");
+                            println!("  Found .app in directory, checking: {}", res_path.display());
+                            if res_path.exists() && Self::is_valid_celeste_dir(&res_path) {
+                                return self.celeste_dir = Some(res_path);
+                            }
+                        }
+                    }
+                }
+                println!("  Not valid or does not exist");
+                None
+            } else {
+                println!("  Not valid or does not exist");
+                None
+            };
+
+            #[cfg(not(target_os = "macos"))]
+            let candidate = if path.exists() && Self::is_valid_celeste_dir(path) {
+                println!("  Directory exists and is valid");
+                Some(path.to_path_buf())
+            } else {
+                println!("  Not valid or does not exist");
+                None
+            };
+
+            if let Some(valid_path) = candidate {
+                self.celeste_dir = Some(valid_path);
+                println!("Found Celeste installation at: {:?}", self.celeste_dir);
                 break;
             }
         }
@@ -96,21 +148,28 @@ impl CelesteAssets {
     fn is_valid_celeste_dir(path: &Path) -> bool {
         // Check for some expected files/directories in a Celeste installation
         let content_dir = path.join("Content");
+        println!("    Checking for Content dir at {}", content_dir.display());
 
         // Check if the Content directory exists and contains expected subdirectories
         if content_dir.exists() && content_dir.is_dir() {
             // Check if the Tileset directory exists
             let tileset_dir = content_dir.join("Graphics").join("Atlases").join("Gameplay");
+            println!("    Checking for Gameplay tileset at {}", tileset_dir.display());
             if tileset_dir.exists() && tileset_dir.is_dir() {
+                println!("    Found tileset directory");
                 return true;
             }
 
             // Alternate check for Celeste.exe (Windows) or Celeste executable (macOS/Linux)
             let exe_path = path.join("Celeste.exe");
             let bin_path = path.join("Celeste");
+            println!("    Checking for executables: {} and {}", exe_path.display(), bin_path.display());
             if exe_path.exists() || bin_path.exists() {
+                println!("    Found executable");
                 return true;
             }
+        } else {
+            println!("    Content directory not found or not a directory");
         }
 
         false
