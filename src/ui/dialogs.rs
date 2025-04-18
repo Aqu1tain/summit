@@ -1,3 +1,5 @@
+#![allow(dead_code, unused_imports, unused_variables)]
+
 use eframe::egui;
 
 use crate::app::CelesteMapEditor;
@@ -17,13 +19,57 @@ pub fn show_open_dialog(editor: &mut CelesteMapEditor, ctx: &egui::Context) {
                 }
 
                 if ui.button("Browse...").clicked() {
-                    if let Some(path) = rfd::FileDialog::new()
-                        .add_filter("Celeste Map", &["bin"])
-                        .pick_file() {
+                    let mut dialog = rfd::FileDialog::new();
+                    dialog = dialog.add_filter("Celeste Map", &["bin"]);
+                    let mut fallback_to_home = true;
+                    if let Some(celeste_dir) = &editor.celeste_assets.celeste_dir {
+                        #[cfg(target_os = "macos")]
+                        {
+                            let maps_path = celeste_dir.join("Contents").join("Resources").join("Content").join("Maps");
+                            if maps_path.exists() {
+                                dialog = dialog.set_directory(&maps_path);
+                                fallback_to_home = false;
+                            }
+                        }
+                        #[cfg(any(target_os = "windows", target_os = "linux"))]
+                        {
+                            let maps_path = celeste_dir.join("Content").join("Maps");
+                            if maps_path.exists() {
+                                dialog = dialog.set_directory(&maps_path);
+                                fallback_to_home = false;
+                            }
+                        }
+                    }
+                    if fallback_to_home {
+                        if let Some(home_dir) = dirs::home_dir() {
+                            dialog = dialog.set_directory(home_dir);
+                        }
+                    }
+                    if let Some(path) = dialog.pick_file() {
                         editor.bin_path = Some(path.display().to_string());
                     }
                 }
             });
+
+            #[cfg(target_os = "macos")]
+            if let Some(celeste_dir) = &editor.celeste_assets.celeste_dir {
+                let maps_path = celeste_dir.join("Contents").join("Resources").join("Content").join("Maps");
+                if !maps_path.exists() || !maps_path.starts_with(dirs::home_dir().unwrap_or_default()) {
+                    ui.add_space(10.0);
+                    ui.group(|ui| {
+                        ui.label(egui::RichText::new("Can't access Maps folder directly?").strong());
+                        ui.label("Use ⌘+Shift+G in the dialog and paste the path below:");
+                        ui.horizontal(|ui| {
+                            if ui.button(egui::RichText::new("Copy Maps Path").color(egui::Color32::from_rgb(0, 120, 255))).clicked() {
+                                ui.output().copied_text = maps_path.display().to_string();
+                            }
+                            ui.add(egui::TextEdit::singleline(&mut maps_path.display().to_string()).desired_width(300.0).font(egui::TextStyle::Monospace));
+                        });
+                        ui.add_space(5.0);
+                        ui.label(egui::RichText::new("⚠️  On some macOS versions, using ⌘+Shift+G may crash the app due to a bug in the file dialog library. If this happens, please navigate manually or update your app to the latest version.").color(egui::Color32::from_rgb(200, 50, 50)).size(13.0));
+                    });
+                }
+            }
 
             ui.horizontal(|ui| {
                 if ui.button("Cancel").clicked() {
@@ -164,7 +210,8 @@ pub fn show_celeste_path_dialog(editor: &mut CelesteMapEditor, ctx: &egui::Conte
             
             if editor.celeste_assets.celeste_dir.is_none() {
                 ui.label("Celeste installation not found!");
-                ui.label("Please specify the path to your Celeste installation folder.");
+                ui.label("The app will try to auto-detect your Celeste installation in the default location for your OS.");
+                ui.label("If it is not found, please specify the path to your Celeste installation folder manually.");
                 ui.label("This is needed to load textures for the map editor.");
             } else {
                 ui.label("Current Celeste installation path:");

@@ -1,11 +1,14 @@
-// src/celeste_atlas.rs
+#![allow(dead_code, unused_imports, unused_variables)]
+
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{self, Read};
+use std::io::{self, Read, Seek};
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 use byteorder::{LittleEndian, ReadBytesExt};
 use eframe::egui;
 use image::RgbaImage;
+use lazy_static::lazy_static;
 
 /// Metadata for a sprite in a Celeste atlas
 #[derive(Debug, Clone)]
@@ -38,6 +41,10 @@ pub struct Atlas {
     pub data_files: Vec<String>,
     // Added to store raw image data for sprite extraction
     pub images: HashMap<String, RgbaImage>,
+}
+
+lazy_static! {
+    pub static ref GLOBAL_SPRITE_MAP: Mutex<HashMap<String, (String, Sprite)>> = Mutex::new(HashMap::new());
 }
 
 impl Atlas {
@@ -73,7 +80,20 @@ impl AtlasManager {
 
     /// Load a Celeste atlas from a .meta file
     pub fn load_atlas(&mut self, name: &str, celeste_dir: &Path, ctx: &egui::Context) -> io::Result<()> {
-        let atlas_path = celeste_dir
+        println!("[DEBUG] Loading atlas '{}'", name);
+        // On MacOS, Celeste's assets are inside Celeste.app/Contents/Resources/Content/Graphics/Atlases
+        // If the provided celeste_dir contains 'Celeste.app', use as-is. Otherwise, append 'Celeste.app'.
+        let mut atlas_base = celeste_dir.to_path_buf();
+        #[cfg(target_os = "macos")]
+        {
+            use std::ffi::OsStr;
+            if !celeste_dir.ends_with("Celeste.app") {
+                atlas_base = atlas_base.join("Celeste.app");
+            }
+            // Always append Contents/Resources
+            atlas_base = atlas_base.join("Contents").join("Resources");
+        }
+        let atlas_path = atlas_base
             .join("Content")
             .join("Graphics")
             .join("Atlases");
@@ -90,9 +110,19 @@ impl AtlasManager {
         let mut atlas = Atlas::new(name);
         self.load_meta_file(&meta_path, &mut atlas, &atlas_path, ctx)?;
 
+        println!("[DEBUG] Loaded {} sprites in atlas '{}'", atlas.sprites.len(), name);
+        println!("[DEBUG] Loaded {} textures in atlas '{}'", atlas.textures.len(), name);
+        println!("[DEBUG] Loaded {} images in atlas '{}'", atlas.images.len(), name);
+
         // Update texture ID to atlas mapping
         for texture in atlas.textures.values() {
             self.texture_id_to_atlas.insert(texture.id(), name.to_string());
+        }
+
+        // Register all sprites in the global mapping
+        for (path, sprite) in &atlas.sprites {
+            // Ensure keys are stored as-is (should already be normalized with "decals/" prefix)
+            Self::register_sprite_global(name, path, sprite);
         }
 
         self.atlases.insert(name.to_string(), atlas);
@@ -198,77 +228,62 @@ impl AtlasManager {
     }
 
     /// Load a Celeste .data file which contains a run-length encoded image
-    fn load_data_file(&self, data_path: &Path) -> io::Result<RgbaImage> {
+    pub fn load_data_file(&self, data_path: &Path) -> io::Result<RgbaImage> {
+        use std::io::Read;
+        println!("[AtlasManager::load_data_file] Attempting to open .data file: {}", data_path.display());
         let mut file = File::open(data_path)?;
 
-        // Read image dimensions and alpha flag
+        // Read header: width (i32), height (i32), has_alpha (u8)
         let width = file.read_i32::<LittleEndian>()? as u32;
         let height = file.read_i32::<LittleEndian>()? as u32;
         let has_alpha = file.read_u8()? != 0;
+        println!("[AtlasManager::load_data_file] width: {width}, height: {height}, has_alpha: {has_alpha}");
 
-        // Create image buffer
-        let mut image = RgbaImage::new(width, height);
+        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+        let mut total_pixels = 0u32;
 
-        // Track RLE state
-        let mut repeats_left = 0;
+        let mut repeats_left = 0u8;
         let mut r = 0u8;
         let mut g = 0u8;
         let mut b = 0u8;
         let mut a = 255u8;
 
-        // Fixed RLE decoding for proper boundary checking
-        for y in 0..height {
-            // Reset repeats at start of each row for safety
-            repeats_left = 0;
-
-            for x in 0..width {
-                if repeats_left == 0 {
-                    // Read new pixel and repeat count
-                    let rep = file.read_u8()?;
-                    // Fix: ensure rep is at least 1
-                    repeats_left = if rep > 0 { rep - 1 } else { 0 };
-
-                    if has_alpha {
-                        let alpha = file.read_u8()?;
-
-                        if alpha > 0 {
-                            a = alpha;
-                            // Celeste stores BGR, we need RGB
-                            b = file.read_u8()?;
-                            g = file.read_u8()?;
-                            r = file.read_u8()?;
-
-                            // Fixed alpha un-premultiplication with proper bounds checking
-                            if alpha < 255 && alpha > 0 {
-                                let alpha_f = alpha as f32 / 255.0;
-                                // Prevent division by zero and clamping to valid range
-                                r = ((r as f32 / alpha_f).min(255.0).max(0.0)) as u8;
-                                g = ((g as f32 / alpha_f).min(255.0).max(0.0)) as u8;
-                                b = ((b as f32 / alpha_f).min(255.0).max(0.0)) as u8;
-                            }
-                        } else {
-                            r = 0;
-                            g = 0;
-                            b = 0;
-                            a = 0;
-                        }
-                    } else {
-                        // No alpha channel
+        while total_pixels < width * height {
+            if repeats_left == 0 {
+                let rep = file.read_u8()?;
+                repeats_left = rep;
+                if has_alpha {
+                    let alpha = file.read_u8()?;
+                    if alpha > 0 {
                         b = file.read_u8()?;
                         g = file.read_u8()?;
                         r = file.read_u8()?;
-                        a = 255;
+                        a = alpha;
+                    } else {
+                        r = 0;
+                        g = 0;
+                        b = 0;
+                        a = 0;
                     }
-
-                    image.put_pixel(x, y, image::Rgba([r, g, b, a]));
                 } else {
-                    // Repeat the previous pixel
-                    image.put_pixel(x, y, image::Rgba([r, g, b, a]));
-                    repeats_left -= 1;
+                    b = file.read_u8()?;
+                    g = file.read_u8()?;
+                    r = file.read_u8()?;
+                    a = 255;
                 }
             }
+            // Write pixel
+            pixels.push(r);
+            pixels.push(g);
+            pixels.push(b);
+            pixels.push(a);
+            repeats_left -= 1;
+            total_pixels += 1;
         }
 
+        println!("[AtlasManager::load_data_file] Finished decoding. Total pixels: {}", pixels.len() / 4);
+        let image = RgbaImage::from_vec(width, height, pixels)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "failed to create image from buffer"))?;
         Ok(image)
     }
 
@@ -287,12 +302,14 @@ impl AtlasManager {
 
     /// Get a sprite by path from a specific atlas
     pub fn get_sprite(&self, atlas_name: &str, sprite_path: &str) -> Option<&Sprite> {
+        println!("[DEBUG] get_sprite('{}', '{}')", atlas_name, sprite_path);
         self.atlases.get(atlas_name).and_then(|atlas| atlas.get_sprite(sprite_path))
     }
 
     /// Get the raw image data from an atlas
     pub fn get_atlas_image(&self, atlas_name: &str, data_file: &str) -> Option<&RgbaImage> {
-        self.atlases.get(atlas_name).and_then(|atlas| atlas.images.get(data_file))
+        println!("[DEBUG] get_atlas_image('{}', '{}')", atlas_name, data_file);
+        self.atlases.get(atlas_name)?.images.get(data_file)
     }
 
     /// Draw a sprite to the screen
@@ -340,22 +357,13 @@ impl AtlasManager {
         painter.add(egui::epaint::Shape::mesh(mesh));
     }
 
-    /// Get texture path for common Celeste tile characters
-    pub fn get_texture_path_for_tile(&self, tile_char: char) -> Option<&'static str> {
-        match tile_char {
-            '9' => Some("tilesSolid"),        // Main solid tiles
-            'm' => Some("mountainTiles"),     // Mountain tiles
-            'n' => Some("templeTiles"),       // Temple tiles
-            'a' => Some("coreTiles"),         // Core (alt) tiles
-            '1' => Some("tilesSolid"),        // Standard solid tile
-            '3' => Some("tilesSolid"),        // Another standard solid tile
-            '4' => Some("tilesSolid"),        // Yet another standard solid tile
-            '7' => Some("tilesSolid"),        // And another standard solid tile
-            'b' => Some("reflectionTiles"),   // Reflection tiles
-            'c' => Some("moonTiles"),         // Moon tiles
-            'd' => Some("dreamTiles"),        // Dream tiles
-            // Add more mappings as needed
-            _ => None
-        }
+    /// Register a sprite globally
+    pub fn register_sprite_global(atlas_name: &str, path: &str, sprite: &Sprite) {
+        GLOBAL_SPRITE_MAP.lock().unwrap().insert(path.to_string(), (atlas_name.to_string(), sprite.clone()));
+    }
+
+    /// Get a sprite globally by path
+    pub fn get_sprite_global(path: &str) -> Option<(String, Sprite)> {
+        GLOBAL_SPRITE_MAP.lock().unwrap().get(path).cloned()
     }
 }

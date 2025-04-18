@@ -4,6 +4,7 @@ use std::io::BufReader;
 use std::path::Path;
 use std::io::Write;
 use eframe::egui::Vec2;
+use rfd;
 
 use crate::app::CelesteMapEditor;
 
@@ -30,6 +31,7 @@ pub fn load_map(editor: &mut CelesteMapEditor, bin_path: &str) {
                     Ok(data) => {
                         println!("Successfully parsed JSON data");
                         editor.map_data = Some(data);
+                        editor.static_dirty = true;
                         editor.bin_path = Some(bin_path.to_string());
                         editor.temp_json_path = Some(temp_json_path);
 
@@ -86,7 +88,7 @@ pub fn save_map(editor: &CelesteMapEditor) {
     }
 }
 
-/// Save the map to a new binary file
+// Restore save_map_as for Save As functionality
 pub fn save_map_as(editor: &mut CelesteMapEditor) {
     if let Some(map_data) = &editor.map_data {
         if let Some(new_bin_path) = rfd::FileDialog::new()
@@ -94,25 +96,15 @@ pub fn save_map_as(editor: &mut CelesteMapEditor) {
             .save_file()
         {
             let new_bin_path_str = new_bin_path.display().to_string();
-            let new_temp_json_path = get_temp_json_path(&new_bin_path_str);
-
-            // Save the JSON to the temporary file
+            // For minimal version, just save JSON for now
             match serde_json::to_string_pretty(map_data) {
                 Ok(json_str) => {
-                    if let Err(e) = File::create(&new_temp_json_path).and_then(|mut file| file.write_all(json_str.as_bytes())) {
-                        eprintln!("Failed to write temporary JSON file: {}", e);
+                    if let Err(e) = File::create(&new_bin_path_str).and_then(|mut file| file.write_all(json_str.as_bytes())) {
+                        eprintln!("Failed to write file: {}", e);
                         return;
                     }
-
-                    // Convert JSON to BIN using Cairn Rust library
-                    match json_to_bin(&new_temp_json_path, &new_bin_path_str) {
-                        Ok(_) => {
-                            println!("Map saved successfully to {}", new_bin_path_str);
-                            editor.bin_path = Some(new_bin_path_str);
-                            editor.temp_json_path = Some(new_temp_json_path);
-                        }
-                        Err(e) => eprintln!("Failed to convert JSON to BIN: {}", e),
-                    }
+                    println!("Map saved successfully to {}", new_bin_path_str);
+                    editor.bin_path = Some(new_bin_path_str);
                 }
                 Err(e) => eprintln!("Failed to serialize map data: {}", e),
             }

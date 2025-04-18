@@ -118,3 +118,93 @@ Le trait `epi::App` est implémenté pour intégrer l'éditeur dans la boucle de
 ## La Fonction `main`
 
 La fonction `main` crée une instance de l'éditeur (`CelesteMapEditor::new()`) et lance l'application avec `eframe::run_native`, en utilisant les options natives par défaut.
+
+---
+
+# Celeste Texture System
+
+This document describes the texture and tileset system used in the original Celeste game (2018, Maddy Makes Games), focusing on how tile graphics and sprite assets are organized, stored, and referenced by the engine and modding tools.
+
+---
+
+## 1. Texture Atlases
+
+Celeste uses a system of texture atlases to efficiently store and render all the game's graphical assets:
+
+- **Atlas:** A single large image (usually a PNG) containing many smaller sprites or tiles packed together.
+- **Metadata:** Each atlas has a corresponding `.meta` file (in YAML or binary format) describing the coordinates and dimensions of each sprite or tile within the atlas.
+- **Types:**
+  - `Gameplay` atlas: Contains all tilesets, objects, and most in-game graphics.
+  - `Gui` atlas: Contains UI elements.
+  - Modded atlases: Custom atlases can be loaded by mods or custom maps.
+
+---
+
+## 2. Tilesets
+
+Tilesets define the appearance of the game's terrain and backgrounds. Each tileset is a grid of 8x8 pixel tiles, packed into a PNG and referenced by a tileset XML file.
+
+- **Tileset PNG:** Found in `Content/Graphics/tilesets/` (e.g., `dirt.png`, `snow.png`).
+- **Tileset XML:**
+  - `ForegroundTiles.xml` and `BackgroundTiles.xml` define all tilesets and their tile character mappings.
+  - Each `<Tileset>` element has an `id`, `path`, and a set of `<set>` elements with a `mask` and a list of tile coordinates.
+- **Tile Characters:**
+  - Each tile in a map is represented by a single character (e.g., '1', '3', 'z').
+  - The XML maps each character to a specific tileset and mask logic.
+
+---
+
+## 3. Tile Masking and Autotiling
+
+Celeste uses an autotiling system to select the appropriate tile graphic based on the arrangement of neighboring tiles:
+
+- **Mask:** A 9-character string (e.g., `x0x-111-x1x`) describing which neighbors are solid.
+- **Sets:** Each `<set>` in the XML defines one or more tile graphics for a specific mask.
+- **Autotiling:** When rendering, the engine computes the mask for each tile and selects the correct tile graphic from the set.
+
+---
+
+## 4. Sprite Loading and Referencing
+
+- **Sprites:** All moving objects, characters, and effects are stored as sprites in the atlas.
+- **Sprite Path:** Sprites are referenced by their path in the atlas metadata (e.g., `objects/player/idle00`).
+- **Loading:**
+  - The engine loads the atlas PNG and parses the `.meta` file to know where each sprite is located.
+  - Sprites can be animated by referencing multiple frames in sequence.
+
+---
+
+## 5. File Locations
+
+- `Content/Graphics/Gameplay.png` and `.meta`: Main atlas for game graphics.
+- `Content/Graphics/tilesets/`: Folder containing all tileset PNGs.
+- `Content/Graphics/ForegroundTiles.xml`, `BackgroundTiles.xml`: Tileset definitions and autotile logic.
+- `Content/Graphics/Gui.png` and `.meta`: UI graphics.
+
+---
+
+## 6. Modding and Extensions
+
+- **New Atlases:** Mods can provide new atlases and `.meta` files.
+- **Custom Tilesets:** Custom maps can add new tileset PNGs and update the XML.
+- **Sprite Replacement:** Sprites can be replaced or extended by adding new entries to the atlas and metadata.
+
+---
+
+## 7. Technical Notes
+
+- **Atlas Packing:** Atlases are usually packed with tools (e.g., `Packer.exe`) to optimize space and reduce draw calls.
+- **.meta Format:** The `.meta` file can be YAML or binary, listing each sprite's name, position, and size.
+- **XNB Format:** Some assets are stored in XNB (Microsoft's XNA format), but most graphics are PNG + meta.
+
+---
+
+## 8. References
+
+- [Celeste Modding Wiki - Atlases](https://github.com/CelestialCartographers/Loenn/wiki/Atlases)
+- [Celeste Modding Wiki - Tilesets](https://github.com/CelestialCartographers/Loenn/wiki/Tilesets)
+- [Everest Modding Tools](https://everestapi.github.io/)
+
+---
+
+This documentation is focused on the vanilla Celeste texture system and is meant as a technical reference for engine developers and modders.
