@@ -1,3 +1,5 @@
+#![allow(dead_code, unused_imports, unused_variables)]
+
 use eframe::egui;
 
 use crate::app::CelesteMapEditor;
@@ -20,12 +22,10 @@ pub fn show_open_dialog(editor: &mut CelesteMapEditor, ctx: &egui::Context) {
                     let mut dialog = rfd::FileDialog::new();
                     dialog = dialog.add_filter("Celeste Map", &["bin"]);
                     let mut fallback_to_home = true;
-                    let mut maps_path_str = String::new();
                     if let Some(celeste_dir) = &editor.celeste_assets.celeste_dir {
                         #[cfg(target_os = "macos")]
                         {
                             let maps_path = celeste_dir.join("Contents").join("Resources").join("Content").join("Maps");
-                            maps_path_str = maps_path.display().to_string();
                             if maps_path.exists() {
                                 dialog = dialog.set_directory(&maps_path);
                                 fallback_to_home = false;
@@ -34,7 +34,6 @@ pub fn show_open_dialog(editor: &mut CelesteMapEditor, ctx: &egui::Context) {
                         #[cfg(any(target_os = "windows", target_os = "linux"))]
                         {
                             let maps_path = celeste_dir.join("Content").join("Maps");
-                            maps_path_str = maps_path.display().to_string();
                             if maps_path.exists() {
                                 dialog = dialog.set_directory(&maps_path);
                                 fallback_to_home = false;
@@ -211,7 +210,8 @@ pub fn show_celeste_path_dialog(editor: &mut CelesteMapEditor, ctx: &egui::Conte
             
             if editor.celeste_assets.celeste_dir.is_none() {
                 ui.label("Celeste installation not found!");
-                ui.label("Please specify the path to your Celeste installation folder.");
+                ui.label("The app will try to auto-detect your Celeste installation in the default location for your OS.");
+                ui.label("If it is not found, please specify the path to your Celeste installation folder manually.");
                 ui.label("This is needed to load textures for the map editor.");
             } else {
                 ui.label("Current Celeste installation path:");

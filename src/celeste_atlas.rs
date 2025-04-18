@@ -1,11 +1,14 @@
-// src/celeste_atlas.rs
+#![allow(dead_code, unused_imports, unused_variables)]
+
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, Read, Seek};
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 use byteorder::{LittleEndian, ReadBytesExt};
 use eframe::egui;
 use image::RgbaImage;
+use lazy_static::lazy_static;
 
 /// Metadata for a sprite in a Celeste atlas
 #[derive(Debug, Clone)]
@@ -38,6 +41,10 @@ pub struct Atlas {
     pub data_files: Vec<String>,
     // Added to store raw image data for sprite extraction
     pub images: HashMap<String, RgbaImage>,
+}
+
+lazy_static! {
+    pub static ref GLOBAL_SPRITE_MAP: Mutex<HashMap<String, (String, Sprite)>> = Mutex::new(HashMap::new());
 }
 
 impl Atlas {
@@ -73,7 +80,20 @@ impl AtlasManager {
 
     /// Load a Celeste atlas from a .meta file
     pub fn load_atlas(&mut self, name: &str, celeste_dir: &Path, ctx: &egui::Context) -> io::Result<()> {
-        let atlas_path = celeste_dir
+        println!("[DEBUG] Loading atlas '{}'", name);
+        // On MacOS, Celeste's assets are inside Celeste.app/Contents/Resources/Content/Graphics/Atlases
+        // If the provided celeste_dir contains 'Celeste.app', use as-is. Otherwise, append 'Celeste.app'.
+        let mut atlas_base = celeste_dir.to_path_buf();
+        #[cfg(target_os = "macos")]
+        {
+            use std::ffi::OsStr;
+            if !celeste_dir.ends_with("Celeste.app") {
+                atlas_base = atlas_base.join("Celeste.app");
+            }
+            // Always append Contents/Resources
+            atlas_base = atlas_base.join("Contents").join("Resources");
+        }
+        let atlas_path = atlas_base
             .join("Content")
             .join("Graphics")
             .join("Atlases");
@@ -90,9 +110,19 @@ impl AtlasManager {
         let mut atlas = Atlas::new(name);
         self.load_meta_file(&meta_path, &mut atlas, &atlas_path, ctx)?;
 
+        println!("[DEBUG] Loaded {} sprites in atlas '{}'", atlas.sprites.len(), name);
+        println!("[DEBUG] Loaded {} textures in atlas '{}'", atlas.textures.len(), name);
+        println!("[DEBUG] Loaded {} images in atlas '{}'", atlas.images.len(), name);
+
         // Update texture ID to atlas mapping
         for texture in atlas.textures.values() {
             self.texture_id_to_atlas.insert(texture.id(), name.to_string());
+        }
+
+        // Register all sprites in the global mapping
+        for (path, sprite) in &atlas.sprites {
+            // Ensure keys are stored as-is (should already be normalized with "decals/" prefix)
+            Self::register_sprite_global(name, path, sprite);
         }
 
         self.atlases.insert(name.to_string(), atlas);
@@ -272,12 +302,14 @@ impl AtlasManager {
 
     /// Get a sprite by path from a specific atlas
     pub fn get_sprite(&self, atlas_name: &str, sprite_path: &str) -> Option<&Sprite> {
+        println!("[DEBUG] get_sprite('{}', '{}')", atlas_name, sprite_path);
         self.atlases.get(atlas_name).and_then(|atlas| atlas.get_sprite(sprite_path))
     }
 
     /// Get the raw image data from an atlas
     pub fn get_atlas_image(&self, atlas_name: &str, data_file: &str) -> Option<&RgbaImage> {
-        self.atlases.get(atlas_name).and_then(|atlas| atlas.images.get(data_file))
+        println!("[DEBUG] get_atlas_image('{}', '{}')", atlas_name, data_file);
+        self.atlases.get(atlas_name)?.images.get(data_file)
     }
 
     /// Draw a sprite to the screen
@@ -325,22 +357,13 @@ impl AtlasManager {
         painter.add(egui::epaint::Shape::mesh(mesh));
     }
 
-    /// Get texture path for common Celeste tile characters
-    pub fn get_texture_path_for_tile(&self, tile_char: char) -> Option<&'static str> {
-        match tile_char {
-            '9' => Some("tilesSolid"),        // Main solid tiles
-            'm' => Some("mountainTiles"),     // Mountain tiles
-            'n' => Some("templeTiles"),       // Temple tiles
-            'a' => Some("coreTiles"),         // Core (alt) tiles
-            '1' => Some("tilesSolid"),        // Standard solid tile
-            '3' => Some("tilesSolid"),        // Another standard solid tile
-            '4' => Some("tilesSolid"),        // Yet another standard solid tile
-            '7' => Some("tilesSolid"),        // And another standard solid tile
-            'b' => Some("reflectionTiles"),   // Reflection tiles
-            'c' => Some("moonTiles"),         // Moon tiles
-            'd' => Some("dreamTiles"),        // Dream tiles
-            // Add more mappings as needed
-            _ => None
-        }
+    /// Register a sprite globally
+    pub fn register_sprite_global(atlas_name: &str, path: &str, sprite: &Sprite) {
+        GLOBAL_SPRITE_MAP.lock().unwrap().insert(path.to_string(), (atlas_name.to_string(), sprite.clone()));
+    }
+
+    /// Get a sprite globally by path
+    pub fn get_sprite_global(path: &str) -> Option<(String, Sprite)> {
+        GLOBAL_SPRITE_MAP.lock().unwrap().get(path).cloned()
     }
 }

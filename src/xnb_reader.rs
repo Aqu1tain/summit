@@ -1,3 +1,5 @@
+#![allow(dead_code, unused_imports, unused_variables)]
+
 // src/xnb_reader.rs
 use std::io::{self, Read, Seek};
 use std::fs::File;

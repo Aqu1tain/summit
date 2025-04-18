@@ -1,4 +1,5 @@
 // src/binary_reader.rs
+#![allow(dead_code, unused_imports, unused_variables)]
 use std::io::{self, Read, Seek, SeekFrom};
 use byteorder::{LittleEndian, ReadBytesExt};
 

@@ -17,5 +17,7 @@ image = "0.24.2"
 shellexpand = "2.1.0"
 cairn = { git = "https://github.com/Aqu1tain/cairn.git" }
 byteorder = "1.4"
+quick-xml = "0.31"
+lazy_static = "1.4"
 # Explicitly add latest winit for compatibility with rfd
 winit = "0.28"

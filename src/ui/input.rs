@@ -20,8 +20,10 @@ pub fn handle_input(editor: &mut CelesteMapEditor, ctx: &egui::Context) {
         let old_zoom = editor.zoom_level;
         if scroll_delta > 0.0 {
             editor.zoom_level *= 1.1;
+            editor.static_dirty = true;
         } else {
             editor.zoom_level /= 1.1;
+            editor.static_dirty = true;
         }
         if editor.zoom_level < 0.1 {
             editor.zoom_level = 0.1;
@@ -31,6 +33,7 @@ pub fn handle_input(editor: &mut CelesteMapEditor, ctx: &egui::Context) {
         let zoom_ratio = editor.zoom_level / old_zoom;
         let offset = (zoom_ratio - 1.0) * zoom_center.to_vec2();
         editor.camera_pos = zoom_ratio * editor.camera_pos + offset;
+        editor.static_dirty = true;
     }
 
     // Handle keyboard shortcuts
@@ -41,6 +44,7 @@ pub fn handle_input(editor: &mut CelesteMapEditor, ctx: &egui::Context) {
     
     if zoom_in_pressed {
         editor.zoom_level *= 1.2;
+        editor.static_dirty = true;
     }
     
     let zoom_out_pressed = match &editor.key_bindings.zoom_out {
@@ -53,6 +57,7 @@ pub fn handle_input(editor: &mut CelesteMapEditor, ctx: &egui::Context) {
         if editor.zoom_level < 0.1 {
             editor.zoom_level = 0.1;
         }
+        editor.static_dirty = true;
     }
     
     // Use modifiers.ctrl to check for Ctrl key instead of separate KeyCode
@@ -92,6 +97,7 @@ pub fn handle_input(editor: &mut CelesteMapEditor, ctx: &egui::Context) {
         
         let delta = pointer.delta();
         editor.camera_pos -= delta;
+        editor.static_dirty = true;
     } else {
         editor.dragging = false;
         editor.drag_start = None;

@@ -1,3 +1,5 @@
+#![allow(dead_code, unused_imports, unused_variables)]
+
 use eframe::egui;
 use serde_json::Value;
 
@@ -20,6 +22,15 @@ pub struct CachedRoom {
     pub room_y: f64,
     pub room_width: f64,
     pub room_height: f64,
+}
+
+/// Represents a command to draw a sprite (texture) at a given position, scale, and tint.
+#[derive(Clone)]
+pub struct SpriteDrawCommand {
+    pub sprite_path: String,
+    pub pos: egui::Pos2,
+    pub size: egui::Vec2,
+    pub tint: egui::Color32,
 }
 
 pub struct CelesteMapEditor {
@@ -45,6 +56,15 @@ pub struct CelesteMapEditor {
     pub use_textures: bool,
     /// Cache for each room’s pre-parsed solids data.
     pub cached_rooms: Vec<CachedRoom>,
+    // Add AtlasManager for texture atlases
+    pub atlas_manager: Option<crate::celeste_atlas::AtlasManager>,
+    pub render_fgtiles_mode: bool, // If true, render fgdecals as tiles instead of solid blocks
+    pub show_fgdecals: bool, // If true, render fgdecals on all rooms
+    pub static_shapes: Option<Vec<egui::Shape>>,
+    pub static_sprites: Option<Vec<SpriteDrawCommand>>,
+    pub static_dirty: bool,
+    pub show_solid_tiles: bool,
+    pub show_tiles: bool,
 }
 
 impl Default for CelesteMapEditor {
@@ -71,6 +91,14 @@ impl Default for CelesteMapEditor {
             show_celeste_path_dialog: false,
             use_textures: true,
             cached_rooms: Vec::new(),
+            atlas_manager: None, // Start with no atlas loaded
+            render_fgtiles_mode: false,
+            show_fgdecals: true,
+            static_shapes: None,
+            static_sprites: None,
+            static_dirty: true,
+            show_solid_tiles: true,
+            show_tiles: true,
         }
     }
 }
@@ -81,15 +109,24 @@ impl CelesteMapEditor {
         editor.key_bindings.load();
 
         // Check if Celeste assets are available, show dialog if not.
-        if editor.celeste_assets.celeste_dir.is_none() {
-            editor.show_celeste_path_dialog = true;
-        } else {
+        if let Some(ref celeste_dir) = editor.celeste_assets.celeste_dir {
             // Initialize atlas manager if Celeste directory is found.
-            if editor.celeste_assets.init_atlas(&cc.egui_ctx) {
-                println!("Successfully initialized atlas manager");
-            } else {
-                println!("Failed to initialize atlas manager, falling back to PNG loading");
+            let mut atlas_manager = crate::celeste_atlas::AtlasManager::new();
+            // Try to load the main atlas (e.g., Gameplay)
+            let ctx = &cc.egui_ctx;
+            let result = atlas_manager.load_atlas("Gameplay", celeste_dir, ctx);
+            match result {
+                Ok(_) => {
+                    println!("Successfully initialized atlas manager");
+                    editor.atlas_manager = Some(atlas_manager);
+                }
+                Err(e) => {
+                    println!("Failed to initialize atlas manager, falling back to PNG loading: {}", e);
+                    editor.atlas_manager = None;
+                }
             }
+        } else {
+            editor.show_celeste_path_dialog = true;
         }
 
         editor
@@ -217,15 +254,6 @@ impl CelesteMapEditor {
         }
 
         println!("--- END MAP STRUCTURE DEBUG ---\n");
-    }
-
-    pub fn get_sprite_for_tile(&self, tile_char: char) -> Option<&crate::celeste_atlas::Sprite> {
-        self.celeste_assets.get_sprite_for_tile(tile_char)
-    }
-
-    // New method to draw a sprite for a tile.
-    pub fn draw_sprite_for_tile(&self, painter: &egui::Painter, rect: egui::Rect, tile_char: char) -> bool {
-        self.celeste_assets.draw_sprite_for_tile(painter, rect, tile_char)
     }
 
     pub fn extract_level_names(&mut self) {
