@@ -297,13 +297,22 @@ impl AtlasManager {
             pixels.as_slice()
         );
 
-        ctx.load_texture(name, color_image, Default::default())
+        ctx.load_texture(name, color_image, egui::TextureFilter::Nearest)
     }
 
     /// Get a sprite by path from a specific atlas
     pub fn get_sprite(&self, atlas_name: &str, sprite_path: &str) -> Option<&Sprite> {
-        println!("[DEBUG] get_sprite('{}', '{}')", atlas_name, sprite_path);
-        self.atlases.get(atlas_name).and_then(|atlas| atlas.get_sprite(sprite_path))
+        if let Some(atlas) = self.atlases.get(atlas_name) {
+            if !atlas.sprites.contains_key(sprite_path) {
+                println!("[ATLAS DEBUG] Sprite not found: '{}'. Available keys (first 10): {:?}", sprite_path, atlas.sprites.keys().take(10).collect::<Vec<_>>());
+            } else {
+                println!("[ATLAS DEBUG] Sprite found: '{}'", sprite_path);
+            }
+            atlas.get_sprite(sprite_path)
+        } else {
+            println!("[ATLAS DEBUG] Atlas '{}' not found!", atlas_name);
+            None
+        }
     }
 
     /// Get the raw image data from an atlas
@@ -339,19 +348,61 @@ impl AtlasManager {
         let atlas_width = texture.size_vec2().x;
         let atlas_height = texture.size_vec2().y;
 
-        // Calculate UV coordinates for the sprite within the atlas
+        // Sprite metadata gives the position of the full tileset in the atlas
+        let sprite_x = sprite.metadata.x as f32;
+        let sprite_y = sprite.metadata.y as f32;
+        // Compute UV coordinates for the sprite within the atlas
         let uv_min = egui::pos2(
-            sprite.metadata.x as f32 / atlas_width,
-            sprite.metadata.y as f32 / atlas_height,
+            sprite_x / atlas_width,
+            sprite_y / atlas_height,
         );
         let uv_max = egui::pos2(
-            (sprite.metadata.x as f32 + sprite.metadata.width as f32) / atlas_width,
-            (sprite.metadata.y as f32 + sprite.metadata.height as f32) / atlas_height,
+            (sprite_x + sprite.metadata.width as f32) / atlas_width,
+            (sprite_y + sprite.metadata.height as f32) / atlas_height,
         );
 
         let uv_rect = egui::Rect::from_min_max(uv_min, uv_max);
 
         // Create mesh for the sprite
+        let mut mesh = egui::epaint::Mesh::with_texture(sprite.texture_id);
+        mesh.add_rect_with_uv(rect, uv_rect, tint);
+        painter.add(egui::epaint::Shape::mesh(mesh));
+    }
+
+    /// Draw a sprite subregion to the screen (e.g., an 8x8 tile from a tileset)
+    pub fn draw_sprite_region(
+        &self,
+        sprite: &Sprite,
+        painter: &egui::Painter,
+        rect: egui::Rect,
+        tint: egui::Color32,
+        region: egui::Rect, // in sprite-local pixel coordinates
+    ) {
+        let atlas_name = match self.texture_id_to_atlas.get(&sprite.texture_id) {
+            Some(name) => name,
+            None => return,
+        };
+        let atlas = match self.atlases.get(atlas_name) {
+            Some(atlas) => atlas,
+            None => return,
+        };
+        let texture = atlas.textures.values().find(|t| t.id() == sprite.texture_id).unwrap();
+        let atlas_width = texture.size_vec2().x;
+        let atlas_height = texture.size_vec2().y;
+        // Sprite metadata gives the position of the full tileset in the atlas
+        let sprite_x = sprite.metadata.x as f32;
+        let sprite_y = sprite.metadata.y as f32;
+        // Compute UVs for the subregion
+        let uv_min = egui::pos2(
+            (sprite_x + region.min.x) / atlas_width,
+            (sprite_y + region.min.y) / atlas_height,
+        );
+        let uv_max = egui::pos2(
+            (sprite_x + region.max.x) / atlas_width,
+            (sprite_y + region.max.y) / atlas_height,
+        );
+        let uv_rect = egui::Rect::from_min_max(uv_min, uv_max);
+        // Create mesh for the subregion
         let mut mesh = egui::epaint::Mesh::with_texture(sprite.texture_id);
         mesh.add_rect_with_uv(rect, uv_rect, tint);
         painter.add(egui::epaint::Shape::mesh(mesh));
