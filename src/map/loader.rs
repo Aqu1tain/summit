@@ -31,15 +31,14 @@ pub fn load_map(editor: &mut CelesteMapEditor, bin_path: &str) {
                     Ok(data) => {
                         println!("Successfully parsed JSON data");
                         editor.map_data = Some(data);
+                        editor.extract_level_names();
+                        editor.cache_rooms();
                         editor.static_dirty = true;
                         editor.bin_path = Some(bin_path.to_string());
                         editor.temp_json_path = Some(temp_json_path);
 
                         // Debug the map structure
                         editor.debug_map_structure();
-
-                        // Extract level names
-                        editor.extract_level_names();
 
                         // Reset current level to the first one
                         editor.current_level_index = 0;

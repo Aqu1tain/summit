@@ -9,19 +9,11 @@ use crate::ui::input::handle_input;
 use crate::ui::dialogs::{show_open_dialog, show_key_bindings_dialog, show_celeste_path_dialog};
 use crate::assets::CelesteAssets;
 
-/// Cached representation of a room’s layout.
+/// Cached representation of a room’s layout with autotile cache.
 #[derive(Clone)]
 pub struct CachedRoom {
-    /// 2D grid of tile characters for this room.
-    pub tiles: Vec<Vec<char>>,
-    /// Offsets from the solids element.
-    pub offset_x: i32,
-    pub offset_y: i32,
-    /// Room position and dimensions (as defined in the map file).
-    pub room_x: f64,
-    pub room_y: f64,
-    pub room_width: f64,
-    pub room_height: f64,
+    pub level_data: crate::ui::render::LevelRenderData,
+    pub json: serde_json::Value,
 }
 
 /// Represents a command to draw a sprite (texture) at a given position, scale, and tint.
@@ -132,8 +124,7 @@ impl CelesteMapEditor {
         editor
     }
 
-    /// Cache the solids data for each room.
-    /// This should be called once after the map has been loaded.
+    /// Cache the LevelRenderData for each room. Call after map load or edit.
     pub fn cache_rooms(&mut self) {
         self.cached_rooms.clear();
         if let Some(map) = &self.map_data {
@@ -143,41 +134,12 @@ impl CelesteMapEditor {
                         if let Some(levels) = child["__children"].as_array() {
                             for level in levels {
                                 if level["__name"] == "level" {
-                                    let room_x = level["x"].as_f64().unwrap_or(0.0);
-                                    let room_y = level["y"].as_f64().unwrap_or(0.0);
-                                    let room_width = level.get("width").and_then(|w| w.as_f64()).unwrap_or(320.0);
-                                    let room_height = level.get("height").and_then(|h| h.as_f64()).unwrap_or(184.0);
-
-                                    // Find the "solids" child and extract data.
-                                    let mut solids_text = String::new();
-                                    let mut offset_x = 0;
-                                    let mut offset_y = 0;
-                                    if let Some(children) = level["__children"].as_array() {
-                                        for child in children {
-                                            if child["__name"] == "solids" {
-                                                solids_text = child["innerText"].as_str().unwrap_or("").to_string();
-                                                offset_x = child["offsetX"].as_i64().unwrap_or(0) as i32;
-                                                offset_y = child["offsetY"].as_i64().unwrap_or(0) as i32;
-                                                break;
-                                            }
-                                        }
+                                    if let Some(ld) = crate::ui::render::extract_level_data(level, self) {
+                                        self.cached_rooms.push(CachedRoom {
+                                            level_data: ld,
+                                            json: level.clone(),
+                                        });
                                     }
-
-                                    // Convert the solids text into a 2D grid of characters.
-                                    let tiles: Vec<Vec<char>> = solids_text
-                                        .lines()
-                                        .map(|line| line.chars().collect())
-                                        .collect();
-
-                                    self.cached_rooms.push(CachedRoom {
-                                        tiles,
-                                        offset_x,
-                                        offset_y,
-                                        room_x,
-                                        room_y,
-                                        room_width,
-                                        room_height,
-                                    });
                                 }
                             }
                         }

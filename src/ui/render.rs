@@ -23,15 +23,28 @@ const CULLING_THRESHOLD_BASE: f32 = 50.0;
 
 // Cached representation for rendering
 #[derive(Clone, Default)]
-struct LevelRenderData {
-    name: String,
-    x: f32,
-    y: f32,
-    width: f32,
-    height: f32,
-    solids: Vec<Vec<char>>,
-    offset_x: i32,
-    offset_y: i32,
+pub struct LevelRenderData {
+    pub name: String,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub solids: Vec<Vec<char>>,
+    pub offset_x: i32,
+    pub offset_y: i32,
+    pub autotile_coords: Vec<Vec<Option<(u32, u32)>>>, // cache for autotiling
+}
+
+impl LevelRenderData {
+    pub fn compute_autotile_coords(&mut self, xml_path: &str) {
+        let tilesets = crate::tile_xml::get_tilesets_with_rules(xml_path);
+        let is_solid = |c: char| is_solid_tile(c);
+        self.autotile_coords = self.solids.iter().enumerate().map(|(y, row)| {
+            row.iter().enumerate().map(|(x, &tile)| {
+                crate::tile_xml::autotile_tile_coord(tile, &self.solids, x, y, tilesets, &is_solid)
+            }).collect()
+        }).collect();
+    }
 }
 
 // Add a static or cached tileset id→path mapping
@@ -61,7 +74,7 @@ fn is_solid_tile(c: char) -> bool {
 }
 
 /// Extract level data from JSON node.
-fn extract_level_data(level: &serde_json::Value) -> Option<LevelRenderData> {
+pub(crate) fn extract_level_data(level: &serde_json::Value, editor: &CelesteMapEditor) -> Option<LevelRenderData> {
     let x = level["x"].as_f64()? as f32;
     let y = level["y"].as_f64()? as f32;
     let width = level.get("width").and_then(|v| v.as_f64()).unwrap_or(320.0) as f32;
@@ -85,7 +98,11 @@ fn extract_level_data(level: &serde_json::Value) -> Option<LevelRenderData> {
         }
     }
     let name = level["name"].as_str().unwrap_or("").to_string();
-    Some(LevelRenderData { name, x, y, width, height, solids, offset_x, offset_y })
+    let mut ld = LevelRenderData { name, x, y, width, height, solids, offset_x, offset_y, autotile_coords: Vec::new() };
+    // Compute autotile coordinates on load
+    let xml_path = get_celeste_fgtiles_xml_path_from_editor(editor);
+    ld.compute_autotile_coords(&xml_path);
+    Some(ld)
 }
 
 /// Normalize decal path to "decals/..."
@@ -167,41 +184,63 @@ fn render_tile(
     }
     let map = crate::tile_xml::TILESET_ID_PATH_MAP.get();
     let mut drew_texture = false;
-    if let Some(map) = map {
-        if let Some(path) = get_tileset_path_for_id(map, tile) {
-            // Get the Celeste assets dir and XML path
-            let xml_path = if let Some(ref celeste_dir) = editor.celeste_assets.celeste_dir {
-                #[cfg(target_os = "macos")]
-                {
-                    let mut p = celeste_dir.clone();
-                    if !p.ends_with("Celeste.app") {
-                        p = p.join("Celeste.app");
-                    }
-                    p.join("Contents/Resources/Content/Graphics/ForegroundTiles.xml").to_string_lossy().to_string()
-                }
-                #[cfg(not(target_os = "macos") )]
-                {
-                    celeste_dir.join("Content/Graphics/ForegroundTiles.xml").to_string_lossy().to_string()
-                }
-            } else {
-                String::new()
-            };
-            // --- AUTOTILING ---
-            let tilesets = get_tilesets_with_rules(&xml_path);
-            let is_solid = |c: char| is_solid_tile(c);
-            if let Some((tile_x, tile_y)) = crate::tile_xml::autotile_tile_coord(tile, solids, x, y, tilesets, &is_solid) {
-                let region = egui::Rect::from_min_size(
-                    egui::Pos2::new((tile_x * 8) as f32, (tile_y * 8) as f32),
-                    egui::Vec2::new(8.0, 8.0),
-                );
-                if let Some(atlas_mgr) = &editor.atlas_manager {
-                    let sprite_path = format!("tilesets/{}", path);
-                    match atlas_mgr.get_sprite("Gameplay", &sprite_path) {
-                        Some(sprite) => {
-                            atlas_mgr.draw_sprite_region(sprite, painter, rect, Color32::WHITE, region);
-                            drew_texture = true;
+    if !ld.autotile_coords.is_empty() {
+        if let Some(coord) = ld.autotile_coords.get(y).and_then(|row| row.get(x)).and_then(|v| *v) {
+            if let Some(map) = map {
+                if let Some(path) = get_tileset_path_for_id(map, tile) {
+                    let region = egui::Rect::from_min_size(
+                        egui::Pos2::new((coord.0 * 8) as f32, (coord.1 * 8) as f32),
+                        egui::Vec2::new(8.0, 8.0),
+                    );
+                    if let Some(atlas_mgr) = &editor.atlas_manager {
+                        let sprite_path = format!("tilesets/{}", path);
+                        match atlas_mgr.get_sprite("Gameplay", &sprite_path) {
+                            Some(sprite) => {
+                                atlas_mgr.draw_sprite_region(sprite, painter, rect, Color32::WHITE, region);
+                                drew_texture = true;
+                            }
+                            None => {}
                         }
-                        None => {}
+                    }
+                }
+            }
+        }
+    } else {
+        // fallback: recompute on the fly (shouldn't happen)
+        if let Some(map) = map {
+            if let Some(path) = get_tileset_path_for_id(map, tile) {
+                let xml_path = if let Some(ref celeste_dir) = editor.celeste_assets.celeste_dir {
+                    #[cfg(target_os = "macos")]
+                    {
+                        let mut p = celeste_dir.clone();
+                        if !p.ends_with("Celeste.app") {
+                            p = p.join("Celeste.app");
+                        }
+                        p.join("Contents/Resources/Content/Graphics/ForegroundTiles.xml").to_string_lossy().to_string()
+                    }
+                    #[cfg(not(target_os = "macos") )]
+                    {
+                        celeste_dir.join("Content/Graphics/ForegroundTiles.xml").to_string_lossy().to_string()
+                    }
+                } else {
+                    String::new()
+                };
+                let tilesets = crate::tile_xml::get_tilesets_with_rules(&xml_path);
+                let is_solid = |c: char| is_solid_tile(c);
+                if let Some((tile_x, tile_y)) = crate::tile_xml::autotile_tile_coord(tile, solids, x, y, tilesets, &is_solid) {
+                    let region = egui::Rect::from_min_size(
+                        egui::Pos2::new((tile_x * 8) as f32, (tile_y * 8) as f32),
+                        egui::Vec2::new(8.0, 8.0),
+                    );
+                    if let Some(atlas_mgr) = &editor.atlas_manager {
+                        let sprite_path = format!("tilesets/{}", path);
+                        match atlas_mgr.get_sprite("Gameplay", &sprite_path) {
+                            Some(sprite) => {
+                                atlas_mgr.draw_sprite_region(sprite, painter, rect, Color32::WHITE, region);
+                                drew_texture = true;
+                            }
+                            None => {}
+                        }
                     }
                 }
             }
@@ -446,32 +485,17 @@ fn collect_levels_with_json(
     node: &serde_json::Value,
     out: &mut Vec<(usize, LevelRenderData, serde_json::Value)>,
     mut idx: usize,
+    editor: &CelesteMapEditor,
 ) -> usize {
     if node["__name"].as_str()==Some("level") {
-        if let Some(ld)=extract_level_data(node) {
+        if let Some(ld)=extract_level_data(node, editor) {
             out.push((idx,ld,node.clone())); idx+=1;
         }
     }
     if let Some(children)=node["__children"].as_array() {
-        for c in children { idx=collect_levels_with_json(c,out,idx); }
+        for c in children { idx=collect_levels_with_json(c,out,idx,editor); }
     }
     idx
-}
-
-/// Render only current room
-fn render_current_room(
-    editor: &mut CelesteMapEditor,
-    painter: &egui::Painter,
-    tile_size: f32,
-    view: Rect,
-    ctx: &egui::Context,
-) {
-    if let Some(json)=editor.get_current_level().cloned() {
-        if let Some(ld)=extract_level_data(&json) {
-            render_room_content(editor,painter,&ld,&json,tile_size,view,ctx);
-            render_room_outline_and_label(editor,painter,&ld,tile_size,ctx,true);
-        }
-    }
 }
 
 /// Render all rooms
@@ -482,10 +506,14 @@ fn render_all_rooms(
     response: &egui::Response,
     ctx: &egui::Context,
 ) {
-    let view=response.rect;
-    let mut levels=Vec::new();
-    if let Some(map)=&editor.map_data { collect_levels_with_json(map,&mut levels,0); }
-    for (i,ld,json) in levels {
+    let view = response.rect;
+    let cached_rooms_len = editor.cached_rooms.len();
+    for i in 0..cached_rooms_len {
+        // Copy the data out to avoid borrow conflicts
+        let (ld, json) = {
+            let room = &editor.cached_rooms[i];
+            (room.level_data.clone(), room.json.clone())
+        };
         // Compute room rectangle in world coordinates
         let scale = TILE_SIZE / 8.0;
         let room_x = (ld.x) * scale * editor.zoom_level - editor.camera_pos.x;
@@ -505,6 +533,25 @@ fn render_all_rooms(
             render_room_content(editor, painter, &ld, &json, tile_size, view, ctx);
             render_room_outline_and_label(editor, painter, &ld, tile_size, ctx, sel);
         }
+    }
+}
+
+/// Render only current room
+fn render_current_room(
+    editor: &mut CelesteMapEditor,
+    painter: &egui::Painter,
+    tile_size: f32,
+    view: Rect,
+    ctx: &egui::Context,
+) {
+    let idx = editor.current_level_index;
+    if idx < editor.cached_rooms.len() {
+        let (ld, json) = {
+            let room = &editor.cached_rooms[idx];
+            (room.level_data.clone(), room.json.clone())
+        };
+        render_room_content(editor, painter, &ld, &json, tile_size, view, ctx);
+        render_room_outline_and_label(editor, painter, &ld, tile_size, ctx, true);
     }
 }
 
@@ -587,5 +634,22 @@ fn render_central_panel(editor: &mut CelesteMapEditor, ctx: &egui::Context) {
     });
 }
 
-// In your app startup or initialization, call:
-// ensure_tileset_id_path_map_loaded("Contents/Resources/Content/Graphics/ForegroundTiles.xml");
+// Helper: get the ForegroundTiles.xml path for the current platform/editor
+fn get_celeste_fgtiles_xml_path_from_editor(editor: &CelesteMapEditor) -> String {
+    if let Some(ref celeste_dir) = editor.celeste_assets.celeste_dir {
+        #[cfg(target_os = "macos")]
+        {
+            let mut p = celeste_dir.clone();
+            if !p.ends_with("Celeste.app") {
+                p = p.join("Celeste.app");
+            }
+            p.join("Contents/Resources/Content/Graphics/ForegroundTiles.xml").to_string_lossy().to_string()
+        }
+        #[cfg(not(target_os = "macos") )]
+        {
+            celeste_dir.join("Content/Graphics/ForegroundTiles.xml").to_string_lossy().to_string()
+        }
+    } else {
+        String::new()
+    }
+}
