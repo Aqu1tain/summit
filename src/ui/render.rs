@@ -4,6 +4,8 @@ use eframe::egui;
 use egui::{Color32, Pos2, Rect, Stroke, Vec2};
 use crate::app::CelesteMapEditor;
 use crate::map::loader::{save_map, save_map_as};
+use crate::tile_xml::{load_tileset_id_path_map, get_tileset_path_for_id, ensure_tileset_id_path_map_loaded_from_celeste, get_first_tile_coords_for_id_or_default};
+use crate::celeste_atlas::AtlasManager;
 
 // Constants
 pub const TILE_SIZE: f32 = 20.0;
@@ -32,15 +34,25 @@ struct LevelRenderData {
     offset_y: i32,
 }
 
-/// Returns the color for a tile character.
-fn get_tile_color(tile_char: char) -> Color32 {
-    match tile_char {
-        '1' => Color32::from_rgb(156, 102, 31),
-        '2' => Color32::from_rgb(70, 120, 200),
-        '3' => Color32::from_rgb(130, 130, 130),
-        '4' => Color32::from_rgb(100, 130, 100),
-        _ => SOLID_TILE_COLOR,
-    }
+// Add a static or cached tileset id→path mapping
+use std::sync::OnceLock;
+static TILESET_ID_PATH_MAP: OnceLock<std::collections::HashMap<char, String>> = OnceLock::new();
+
+/// Call this at startup or before rendering to load the mapping
+pub fn ensure_tileset_id_path_map_loaded(xml_path: &str) {
+    TILESET_ID_PATH_MAP.get_or_init(|| load_tileset_id_path_map(xml_path));
+}
+
+/// Returns the color for a tile character, or None if a texture should be used.
+fn get_tile_color(tile_char: char) -> Option<Color32> {
+    //match tile_char {
+    //    '1' => Some(Color32::from_rgb(156, 102, 31)),
+    //    '2' => Some(Color32::from_rgb(70, 120, 200)),
+    //    '3' => Some(Color32::from_rgb(130, 130, 130)),
+    //    '4' => Some(Color32::from_rgb(100, 130, 100)),
+    //    _ => None, // Use texture if available
+    //}
+    None
 }
 
 /// Is this a solid tile?
@@ -95,6 +107,30 @@ fn render_tile(
     tile_size: f32,
     visible: bool,
 ) {
+    // Ensure tileset mapping is loaded from Celeste assets (once per session)
+    ensure_tileset_id_path_map_loaded_from_celeste(editor);
+    // TEMP DEBUG: print mapping status for first tile
+    if x == 0 && y == 0 {
+        let map = crate::tile_xml::TILESET_ID_PATH_MAP.get();
+        eprintln!("[TILE DEBUG] tile char: {}", tile);
+        if let Some(map) = map {
+            if let Some(path) = get_tileset_path_for_id(map, tile) {
+                eprintln!("[TILE DEBUG] tileset path for '{}': {}", tile, path);
+                let sprite_path = format!("tilesets/{}", path);
+                eprintln!("[TILE DEBUG] sprite_path: {}", sprite_path);
+                if let Some(atlas_mgr) = &editor.atlas_manager {
+                    let found = atlas_mgr.get_sprite("Gameplay", &sprite_path).is_some();
+                    eprintln!("[TILE DEBUG] atlas get_sprite('{}'): {}", sprite_path, found);
+                } else {
+                    eprintln!("[TILE DEBUG] atlas_manager is None");
+                }
+            } else {
+                eprintln!("[TILE DEBUG] No tileset path for '{}'", tile);
+            }
+        } else {
+            eprintln!("[TILE DEBUG] TILESET_ID_PATH_MAP is None");
+        }
+    }
     if !visible || tile == '0' || tile == ' ' {
         return;
     }
@@ -107,7 +143,8 @@ fn render_tile(
     let world_y0 = (ld.y + ld.offset_y as f32) * scale * editor.zoom_level;
     let px = world_x0 + x as f32 * tile_size - editor.camera_pos.x;
     let py = world_y0 + y as f32 * tile_size - editor.camera_pos.y;
-    let rect = Rect::from_min_size(Pos2::new(px, py), Vec2::splat(tile_size));
+    let pos = Pos2::new(px, py);
+    let rect = Rect::from_min_size(pos, Vec2::splat(tile_size));
 
     // Infill check
     let mut internal = true;
@@ -128,25 +165,70 @@ fn render_tile(
         }
         if !internal { break; }
     }
-    let color = if internal { INFILL_COLOR } else { get_tile_color(tile) };
-    painter.rect_filled(rect, 0.0, color);
+    let map = crate::tile_xml::TILESET_ID_PATH_MAP.get();
+    let mut drew_texture = false;
+    if let Some(map) = map {
+        if let Some(path) = get_tileset_path_for_id(map, tile) {
+            // Get the Celeste assets dir and XML path
+            let xml_path = if let Some(ref celeste_dir) = editor.celeste_assets.celeste_dir {
+                #[cfg(target_os = "macos")]
+                {
+                    let mut p = celeste_dir.clone();
+                    if !p.ends_with("Celeste.app") {
+                        p = p.join("Celeste.app");
+                    }
+                    p.join("Contents/Resources/Content/Graphics/ForegroundTiles.xml").to_string_lossy().to_string()
+                }
+                #[cfg(not(target_os = "macos") )]
+                {
+                    celeste_dir.join("Content/Graphics/ForegroundTiles.xml").to_string_lossy().to_string()
+                }
+            } else {
+                String::new()
+            };
+            // Always use (0,0) as the default tile
+            let (tile_x, tile_y) = crate::tile_xml::get_first_tile_coords_for_id_or_default(&xml_path, tile);
+            // Calculate the subregion for this tile (8x8 region)
+            let region = egui::Rect::from_min_size(
+                egui::Pos2::new((tile_x * 8) as f32, (tile_y * 8) as f32),
+                egui::Vec2::new(8.0, 8.0),
+            );
+            if let Some(atlas_mgr) = &editor.atlas_manager {
+                let sprite_path = format!("tilesets/{}", path);
+                match atlas_mgr.get_sprite("Gameplay", &sprite_path) {
+                    Some(sprite) => {
+                        // Draw only the subregion (first tile)
+                        atlas_mgr.draw_sprite_region(sprite, painter, rect, Color32::WHITE, region);
+                        drew_texture = true;
+                    }
+                    None => {}
+                }
+            }
+        }
+    }
+    if !drew_texture {
+        eprintln!("[TILE DEBUG] drew fallback color for '{}'", tile);
+        // Fallback: draw colored rect
+        let color = get_tile_color(tile).unwrap_or(SOLID_TILE_COLOR);
+        painter.rect_filled(rect, 0.0, color);
 
-    // External borders
-    // Up
-    if !(y > 0 && x < solids[y-1].len() && is_solid_tile(solids[y-1][x])) {
-        painter.rect_filled(Rect::from_min_size(Pos2::new(px, py - 1.0), Vec2::new(tile_size, 1.0)), 0.0, EXTERNAL_BORDER_COLOR);
-    }
-    // Down
-    if !(y + 1 < max_y && x < solids[y+1].len() && is_solid_tile(solids[y+1][x])) {
-        painter.rect_filled(Rect::from_min_size(Pos2::new(px, py + tile_size), Vec2::new(tile_size, 1.0)), 0.0, EXTERNAL_BORDER_COLOR);
-    }
-    // Left
-    if !(x > 0 && x - 1 < solids[y].len() && is_solid_tile(solids[y][x-1])) {
-        painter.rect_filled(Rect::from_min_size(Pos2::new(px - 1.0, py), Vec2::new(1.0, tile_size)), 0.0, EXTERNAL_BORDER_COLOR);
-    }
-    // Right
-    if !(x + 1 < solids[y].len() && is_solid_tile(solids[y][x+1])) {
-        painter.rect_filled(Rect::from_min_size(Pos2::new(px + tile_size, py), Vec2::new(1.0, tile_size)), 0.0, EXTERNAL_BORDER_COLOR);
+        // External borders
+        // Up
+        if !(y > 0 && x < solids[y-1].len() && is_solid_tile(solids[y-1][x])) {
+            painter.rect_filled(Rect::from_min_size(Pos2::new(pos.x, pos.y - 1.0), Vec2::new(tile_size, 1.0)), 0.0, EXTERNAL_BORDER_COLOR);
+        }
+        // Down
+        if !(y + 1 < max_y && x < solids[y+1].len() && is_solid_tile(solids[y+1][x])) {
+            painter.rect_filled(Rect::from_min_size(Pos2::new(pos.x, pos.y + tile_size), Vec2::new(tile_size, 1.0)), 0.0, EXTERNAL_BORDER_COLOR);
+        }
+        // Left
+        if !(x > 0 && x - 1 < solids[y].len() && is_solid_tile(solids[y][x-1])) {
+            painter.rect_filled(Rect::from_min_size(Pos2::new(pos.x - 1.0, pos.y), Vec2::new(1.0, tile_size)), 0.0, EXTERNAL_BORDER_COLOR);
+        }
+        // Right
+        if !(x + 1 < solids[y].len() && is_solid_tile(solids[y][x+1])) {
+            painter.rect_filled(Rect::from_min_size(Pos2::new(pos.x + tile_size, pos.y), Vec2::new(1.0, tile_size)), 0.0, EXTERNAL_BORDER_COLOR);
+        }
     }
 }
 
@@ -216,19 +298,15 @@ fn render_bgdecals(
                         .as_ref()
                         .and_then(|am| am.get_sprite("Gameplay", &path))
                     {
-                        // 1) centre du sprite en pixels-écran
                         let center_x = (room_x + x) * scale * editor.zoom_level - editor.camera_pos.x;
                         let center_y = (room_y + y) * scale * editor.zoom_level - editor.camera_pos.y;
 
-                        // 2) taille du sprite à l'écran
                         let width_px  = spr.metadata.width  as f32 * sx * scale * editor.zoom_level * DECAL_SCALE;
                         let height_px = spr.metadata.height as f32 * sy * scale * editor.zoom_level * DECAL_SCALE;
 
-                        // 3) rectangle centré
                         let pos  = Pos2::new(center_x - width_px  * 0.5, center_y - height_px * 0.5);
                         let size = Vec2::new(width_px, height_px);
 
-                        // 4) on dessine enfin le decal
                         crate::celeste_atlas::AtlasManager::draw_sprite(
                             &editor.atlas_manager.as_ref().unwrap(),
                             &spr,
@@ -507,3 +585,6 @@ fn render_central_panel(editor: &mut CelesteMapEditor, ctx: &egui::Context) {
         else { render_current_room(editor,&painter,size,resp.rect,ctx); }
     });
 }
+
+// In your app startup or initialization, call:
+// ensure_tileset_id_path_map_loaded("Contents/Resources/Content/Graphics/ForegroundTiles.xml");
