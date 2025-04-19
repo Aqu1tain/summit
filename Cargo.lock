@@ -2163,6 +2163,7 @@ dependencies = [
  "egui",
  "image",
  "lazy_static",
+ "once_cell",
  "quick-xml",
  "rfd",
  "serde",
