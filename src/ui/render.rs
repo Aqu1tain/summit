@@ -30,9 +30,11 @@ pub struct LevelRenderData {
     pub width: f32,
     pub height: f32,
     pub solids: Vec<Vec<char>>,
+    pub bg: Vec<Vec<char>>, // NEW: background tiles
     pub offset_x: i32,
     pub offset_y: i32,
-    pub autotile_coords: Vec<Vec<Option<(u32, u32)>>>, // cache for autotiling
+    pub autotile_coords: Vec<Vec<Option<(u32, u32)>>>, // cache for autotiling (foreground)
+    pub bg_autotile_coords: Vec<Vec<Option<(u32, u32)>>>, // cache for autotiling (background)
 }
 
 impl LevelRenderData {
@@ -45,26 +47,20 @@ impl LevelRenderData {
             }).collect()
         }).collect();
     }
-}
 
-// Add a static or cached tileset id→path mapping
-use std::sync::OnceLock;
-static TILESET_ID_PATH_MAP: OnceLock<std::collections::HashMap<char, String>> = OnceLock::new();
-
-/// Call this at startup or before rendering to load the mapping
-pub fn ensure_tileset_id_path_map_loaded(xml_path: &str) {
-    TILESET_ID_PATH_MAP.get_or_init(|| load_tileset_id_path_map(xml_path));
+    pub fn compute_bg_autotile_coords(&mut self, xml_path: &str) {
+        let tilesets = crate::tile_xml::get_tilesets_with_rules(xml_path);
+        let is_air = |c: char| c == '0'; // treat '0' as air, everything else as filled
+        self.bg_autotile_coords = self.bg.iter().enumerate().map(|(y, row)| {
+            row.iter().enumerate().map(|(x, &tile)| {
+                crate::tile_xml::autotile_tile_coord(tile, &self.bg, x, y, tilesets, &|c| !is_air(c))
+            }).collect()
+        }).collect();
+    }
 }
 
 /// Returns the color for a tile character, or None if a texture should be used.
 fn get_tile_color(tile_char: char) -> Option<Color32> {
-    //match tile_char {
-    //    '1' => Some(Color32::from_rgb(156, 102, 31)),
-    //    '2' => Some(Color32::from_rgb(70, 120, 200)),
-    //    '3' => Some(Color32::from_rgb(130, 130, 130)),
-    //    '4' => Some(Color32::from_rgb(100, 130, 100)),
-    //    _ => None, // Use texture if available
-    //}
     None
 }
 
@@ -81,27 +77,46 @@ pub(crate) fn extract_level_data(level: &serde_json::Value, editor: &CelesteMapE
     let height = level.get("height").and_then(|v| v.as_f64()).unwrap_or(184.0) as f32;
 
     let mut solids = Vec::new();
+    let mut bg = Vec::new();
     let mut offset_x = 0;
     let mut offset_y = 0;
     if let Some(children) = level["__children"].as_array() {
         for child in children {
             if child["__name"] == "solids" {
-                offset_x = child["offsetX"].as_i64().unwrap_or(0) as i32;
-                offset_y = child["offsetY"].as_i64().unwrap_or(0) as i32;
                 if let Some(text) = child["innerText"].as_str() {
                     for line in text.lines() {
                         solids.push(line.chars().collect());
                     }
                 }
-                break;
+            }
+            if child["__name"] == "bg" {
+                if let Some(text) = child["innerText"].as_str() {
+                    for line in text.lines() {
+                        bg.push(line.chars().collect());
+                    }
+                }
             }
         }
     }
     let name = level["name"].as_str().unwrap_or("").to_string();
-    let mut ld = LevelRenderData { name, x, y, width, height, solids, offset_x, offset_y, autotile_coords: Vec::new() };
+    let mut ld = LevelRenderData {
+        name,
+        x,
+        y,
+        width,
+        height,
+        solids,
+        bg,
+        offset_x,
+        offset_y,
+        autotile_coords: Vec::new(),
+        bg_autotile_coords: Vec::new(),
+    };
     // Compute autotile coordinates on load
-    let xml_path = get_celeste_fgtiles_xml_path_from_editor(editor);
-    ld.compute_autotile_coords(&xml_path);
+    let fg_xml_path = get_celeste_fgtiles_xml_path_from_editor(editor);
+    ld.compute_autotile_coords(&fg_xml_path);
+    let bg_xml_path = get_celeste_bgtiles_xml_path_from_editor(editor);
+    ld.compute_bg_autotile_coords(&bg_xml_path);
     Some(ld)
 }
 
@@ -128,7 +143,7 @@ fn render_tile(
     ensure_tileset_id_path_map_loaded_from_celeste(editor);
     // TEMP DEBUG: print mapping status for first tile
     if x == 0 && y == 0 {
-        let map = crate::tile_xml::TILESET_ID_PATH_MAP.get();
+        let map = crate::tile_xml::TILESET_ID_PATH_MAP_FG.get();
         eprintln!("[TILE DEBUG] tile char: {}", tile);
         if let Some(map) = map {
             if let Some(path) = get_tileset_path_for_id(map, tile) {
@@ -145,7 +160,7 @@ fn render_tile(
                 eprintln!("[TILE DEBUG] No tileset path for '{}'", tile);
             }
         } else {
-            eprintln!("[TILE DEBUG] TILESET_ID_PATH_MAP is None");
+            eprintln!("[TILE DEBUG] TILESET_ID_PATH_MAP_FG is None");
         }
     }
     if !visible || tile == '0' || tile == ' ' {
@@ -182,7 +197,7 @@ fn render_tile(
         }
         if !internal { break; }
     }
-    let map = crate::tile_xml::TILESET_ID_PATH_MAP.get();
+    let map = crate::tile_xml::TILESET_ID_PATH_MAP_FG.get();
     let mut drew_texture = false;
     if !ld.autotile_coords.is_empty() {
         if let Some(coord) = ld.autotile_coords.get(y).and_then(|row| row.get(x)).and_then(|v| *v) {
@@ -314,6 +329,206 @@ fn batch_render_tiles(
     }
 }
 
+/// Batch render background tiles
+fn batch_render_bg_tiles(
+    editor: &mut CelesteMapEditor,
+    painter: &egui::Painter,
+    ld: &LevelRenderData,
+    tile_size: f32,
+    view: Rect,
+    _ctx: &egui::Context,
+) {
+    // expand the visible area by a zoom‑aware margin
+    let margin = CULLING_THRESHOLD_BASE * (2.0 / editor.zoom_level.max(0.1));
+    let rect   = view.expand(margin);
+
+    let origin_tiles_x = (ld.x + ld.offset_x as f32) / 8.0;
+    let origin_tiles_y = (ld.y + ld.offset_y as f32) / 8.0;
+
+    let start_x = ((rect.min.x + editor.camera_pos.x) / tile_size - origin_tiles_x)
+        .floor()
+        .max(0.0) as usize;
+    let start_y = ((rect.min.y + editor.camera_pos.y) / tile_size - origin_tiles_y)
+        .floor()
+        .max(0.0) as usize;
+    let end_x   = ((rect.max.x + editor.camera_pos.x) / tile_size - origin_tiles_x)
+        .ceil()
+        .max(0.0) as usize;
+    let end_y   = ((rect.max.y + editor.camera_pos.y) / tile_size - origin_tiles_y)
+        .ceil()
+        .max(0.0) as usize;
+
+    for yy in start_y..=end_y {
+        if yy >= ld.bg.len() { continue; }
+        for xx in start_x..=end_x {
+            if xx >= ld.bg[yy].len() { continue; }
+            let tile = ld.bg[yy][xx];
+            render_bg_tile(painter, ld, editor, xx, yy, tile, tile_size, true);
+        }
+    }
+}
+
+/// Render a single background tile (filled + borders) using the passed LevelRenderData
+fn render_bg_tile(
+    painter: &egui::Painter,
+    ld: &LevelRenderData,
+    editor: &CelesteMapEditor,
+    x: usize,
+    y: usize,
+    tile: char,
+    tile_size: f32,
+    visible: bool,
+) {
+    // Ensure tileset mapping is loaded from Celeste assets (once per session)
+    ensure_tileset_id_path_map_loaded_from_celeste(editor);
+    // TEMP DEBUG: print mapping status for first tile
+    if x == 0 && y == 0 {
+        let map = crate::tile_xml::TILESET_ID_PATH_MAP_BG.get();
+        eprintln!("[BG TILE DEBUG] tile char: {}", tile);
+        if let Some(map) = map {
+            if let Some(path) = get_tileset_path_for_id(map, tile) {
+                eprintln!("[BG TILE DEBUG] tileset path for '{}': {}", tile, path);
+                let sprite_path = format!("tilesets/{}", path);
+                eprintln!("[BG TILE DEBUG] sprite_path: {}", sprite_path);
+                if let Some(atlas_mgr) = &editor.atlas_manager {
+                    let found = atlas_mgr.get_sprite("Gameplay", &sprite_path).is_some();
+                    eprintln!("[BG TILE DEBUG] atlas get_sprite('{}'): {}", sprite_path, found);
+                } else {
+                    eprintln!("[BG TILE DEBUG] atlas_manager is None");
+                }
+            } else {
+                eprintln!("[BG TILE DEBUG] No tileset path for '{}'", tile);
+            }
+        } else {
+            eprintln!("[BG TILE DEBUG] TILESET_ID_PATH_MAP_BG is None");
+        }
+    }
+    if !visible || tile == '0' || tile == ' ' {
+        return;
+    }
+    let bg = &ld.bg;
+    if y >= bg.len() || x >= bg[y].len() {
+        return;
+    }
+    let scale = TILE_SIZE / 8.0;
+    let world_x0 = (ld.x + ld.offset_x as f32) * scale * editor.zoom_level;
+    let world_y0 = (ld.y + ld.offset_y as f32) * scale * editor.zoom_level;
+    let px = world_x0 + x as f32 * tile_size - editor.camera_pos.x;
+    let py = world_y0 + y as f32 * tile_size - editor.camera_pos.y;
+    let pos = Pos2::new(px, py);
+    let rect = Rect::from_min_size(pos, Vec2::splat(tile_size));
+
+    // Infill check
+    let mut internal = true;
+    let max_y = bg.len();
+    let is_air = |c: char| c == '0';
+    for dy in -1..=1 {
+        for dx in -1..=1 {
+            if dx == 0 && dy == 0 { continue; }
+            let ny = y as isize + dy;
+            let nx = x as isize + dx;
+            if ny < 0 || nx < 0 || ny as usize >= max_y {
+                continue;
+            }
+            let row = &bg[ny as usize];
+            if nx as usize >= row.len() || is_air(row[nx as usize]) {
+                internal = false;
+                break;
+            }
+        }
+        if !internal { break; }
+    }
+    let map = crate::tile_xml::TILESET_ID_PATH_MAP_BG.get();
+    let mut drew_texture = false;
+    if !ld.bg_autotile_coords.is_empty() {
+        if let Some(coord) = ld.bg_autotile_coords.get(y).and_then(|row| row.get(x)).and_then(|v| *v) {
+            if let Some(map) = map {
+                if let Some(path) = get_tileset_path_for_id(map, tile) {
+                    let region = egui::Rect::from_min_size(
+                        egui::Pos2::new((coord.0 * 8) as f32, (coord.1 * 8) as f32),
+                        egui::Vec2::new(8.0, 8.0),
+                    );
+                    if let Some(atlas_mgr) = &editor.atlas_manager {
+                        let sprite_path = format!("tilesets/{}", path);
+                        match atlas_mgr.get_sprite("Gameplay", &sprite_path) {
+                            Some(sprite) => {
+                                atlas_mgr.draw_sprite_region(sprite, painter, rect, Color32::WHITE, region);
+                                drew_texture = true;
+                            }
+                            None => {}
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        // Fallback: recompute on the fly (shouldn't happen)
+        if let Some(map) = map {
+            if let Some(path) = get_tileset_path_for_id(map, tile) {
+                let xml_path = if let Some(ref celeste_dir) = editor.celeste_assets.celeste_dir {
+                    #[cfg(target_os = "macos")]
+                    {
+                        let mut p = celeste_dir.clone();
+                        if !p.ends_with("Celeste.app") {
+                            p = p.join("Celeste.app");
+                        }
+                        p.join("Contents/Resources/Content/Graphics/BackgroundTiles.xml").to_string_lossy().to_string()
+                    }
+                    #[cfg(not(target_os = "macos") )]
+                    {
+                        celeste_dir.join("Content/Graphics/BackgroundTiles.xml").to_string_lossy().to_string()
+                    }
+                } else {
+                    String::new()
+                };
+                let tilesets = crate::tile_xml::get_tilesets_with_rules(&xml_path);
+                let is_air = |c: char| c == '0';
+                if let Some((tile_x, tile_y)) = crate::tile_xml::autotile_tile_coord(tile, bg, x, y, tilesets, &|c| !is_air(c)) {
+                    let region = egui::Rect::from_min_size(
+                        egui::Pos2::new((tile_x * 8) as f32, (tile_y * 8) as f32),
+                        egui::Vec2::new(8.0, 8.0),
+                    );
+                    if let Some(atlas_mgr) = &editor.atlas_manager {
+                        let sprite_path = format!("tilesets/{}", path);
+                        match atlas_mgr.get_sprite("Gameplay", &sprite_path) {
+                            Some(sprite) => {
+                                atlas_mgr.draw_sprite_region(sprite, painter, rect, Color32::WHITE, region);
+                                drew_texture = true;
+                            }
+                            None => {}
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if !drew_texture {
+        eprintln!("[BG TILE DEBUG] drew fallback color for '{}'", tile);
+        // Fallback: draw colored rect
+        let color = get_tile_color(tile).unwrap_or(INFILL_COLOR);
+        painter.rect_filled(rect, 0.0, color);
+
+        // External borders
+        // Up
+        if !(y > 0 && x < bg[y-1].len() && !is_air(bg[y-1][x])) {
+            painter.rect_filled(Rect::from_min_size(Pos2::new(pos.x, pos.y - 1.0), Vec2::new(tile_size, 1.0)), 0.0, EXTERNAL_BORDER_COLOR);
+        }
+        // Down
+        if !(y + 1 < max_y && x < bg[y+1].len() && !is_air(bg[y+1][x])) {
+            painter.rect_filled(Rect::from_min_size(Pos2::new(pos.x, pos.y + tile_size), Vec2::new(tile_size, 1.0)), 0.0, EXTERNAL_BORDER_COLOR);
+        }
+        // Left
+        if !(x > 0 && x - 1 < bg[y].len() && !is_air(bg[y][x-1])) {
+            painter.rect_filled(Rect::from_min_size(Pos2::new(pos.x - 1.0, pos.y), Vec2::new(1.0, tile_size)), 0.0, EXTERNAL_BORDER_COLOR);
+        }
+        // Right
+        if !(x + 1 < bg[y].len() && !is_air(bg[y][x+1])) {
+            painter.rect_filled(Rect::from_min_size(Pos2::new(pos.x + tile_size, pos.y), Vec2::new(1.0, tile_size)), 0.0, EXTERNAL_BORDER_COLOR);
+        }
+    }
+}
+
+/// Render bgdecals
 fn render_bgdecals(
     editor: &mut CelesteMapEditor,
     painter: &egui::Painter,
@@ -361,6 +576,7 @@ fn render_bgdecals(
     }
 }
 
+/// Render fgdecals
 fn render_fgdecals(
     editor: &mut CelesteMapEditor,
     painter: &egui::Painter,
@@ -408,7 +624,6 @@ fn render_fgdecals(
     }
 }
 
-
 /// Draw grid lines
 fn draw_grid(painter: &egui::Painter, view: Rect, cam: Vec2, tile_size: f32, zoom: f32) {
     if zoom<0.2 { return; }
@@ -425,6 +640,7 @@ fn draw_grid(painter: &egui::Painter, view: Rect, cam: Vec2, tile_size: f32, zoo
     }
 }
 
+/// Render room content
 fn render_room_content(
     editor: &mut CelesteMapEditor,
     painter: &egui::Painter,
@@ -434,28 +650,22 @@ fn render_room_content(
     view: Rect,
     ctx: &egui::Context,
 ) {
-    // 1) échelle pour passer des pixels Celeste (8px) aux tiles de l'éditeur
-    let scale = TILE_SIZE / 8.0;
-
-    // 2) on applique offset_x/offset_y au coin haut‑gauche de la room
-    let base_x = ld.x;
-    let base_y = ld.y;
-    
-    // 3) on dessine les bg decals avec ce nouvel origin
-    render_bgdecals(editor, painter, json, scale, ctx, base_x, base_y);
-
-    // 4) les tuiles solides
+    // 1) Topmost overlays (top, grid)
+    // (Grid is drawn in render_central_panel, not here)
+    // 2) Background tiles
+    batch_render_bg_tiles(editor, painter, ld, tile_size, view, ctx);
+    // 3) Background decals
+    render_bgdecals(editor, painter, json, TILE_SIZE / 8.0, ctx, ld.x, ld.y);
+    // 4) Foreground tiles
     if editor.show_tiles {
         batch_render_tiles(editor, painter, ld, tile_size, view, ctx);
     }
-
-    // 5) puis les fg decals, même origine
+    // 5) Foreground decals
     if editor.show_fgdecals {
-        render_fgdecals(editor, painter, json, scale, ctx, base_x, base_y);
+        render_fgdecals(editor, painter, json, TILE_SIZE / 8.0, ctx, ld.x, ld.y);
     }
+    // 6) The rest (labels, outlines, etc) are handled after this function
 }
-
-
 
 /// Draw outline and label
 fn render_room_outline_and_label(
@@ -648,6 +858,26 @@ fn get_celeste_fgtiles_xml_path_from_editor(editor: &CelesteMapEditor) -> String
         #[cfg(not(target_os = "macos") )]
         {
             celeste_dir.join("Content/Graphics/ForegroundTiles.xml").to_string_lossy().to_string()
+        }
+    } else {
+        String::new()
+    }
+}
+
+// Helper: get the BackgroundTiles.xml path for the current platform/editor
+fn get_celeste_bgtiles_xml_path_from_editor(editor: &CelesteMapEditor) -> String {
+    if let Some(ref celeste_dir) = editor.celeste_assets.celeste_dir {
+        #[cfg(target_os = "macos")]
+        {
+            let mut p = celeste_dir.clone();
+            if !p.ends_with("Celeste.app") {
+                p = p.join("Celeste.app");
+            }
+            p.join("Contents/Resources/Content/Graphics/BackgroundTiles.xml").to_string_lossy().to_string()
+        }
+        #[cfg(not(target_os = "macos") )]
+        {
+            celeste_dir.join("Content/Graphics/BackgroundTiles.xml").to_string_lossy().to_string()
         }
     } else {
         String::new()

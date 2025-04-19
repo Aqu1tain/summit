@@ -82,38 +82,71 @@ pub fn get_first_tile_coords_for_id_or_default(_xml_path: &str, _id: char) -> (u
     (0, 0)
 }
 
-pub static TILESET_ID_PATH_MAP: OnceCell<HashMap<char, String>> = OnceCell::new();
+pub static TILESET_ID_PATH_MAP_FG: OnceCell<HashMap<char, String>> = OnceCell::new();
+pub static TILESET_ID_PATH_MAP_BG: OnceCell<HashMap<char, String>> = OnceCell::new();
 
-/// Ensures the tileset id/path map is loaded, using the Celeste install path.
+/// Ensures the tileset id/path maps are loaded for both foreground and background, using the Celeste install path.
 pub fn ensure_tileset_id_path_map_loaded_from_celeste(editor: &CelesteMapEditor) {
-    if TILESET_ID_PATH_MAP.get().is_some() { return; }
-    if let Some(ref celeste_dir) = editor.celeste_assets.celeste_dir {
-        let mut xml_path = celeste_dir.clone();
-        // On Mac, assets are inside Celeste.app/Contents/Resources/Content/Graphics/ForegroundTiles.xml
-        #[cfg(target_os = "macos")]
-        {
-            if !xml_path.ends_with("Celeste.app") {
-                xml_path = xml_path.join("Celeste.app");
+    // Load foreground tileset map
+    if TILESET_ID_PATH_MAP_FG.get().is_none() {
+        if let Some(ref celeste_dir) = editor.celeste_assets.celeste_dir {
+            let mut xml_path = celeste_dir.clone();
+            #[cfg(target_os = "macos")]
+            {
+                if !xml_path.ends_with("Celeste.app") {
+                    xml_path = xml_path.join("Celeste.app");
+                }
+                xml_path = xml_path.join("Contents/Resources/Content/Graphics/ForegroundTiles.xml");
             }
-            xml_path = xml_path.join("Contents/Resources/Content/Graphics/ForegroundTiles.xml");
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            xml_path = xml_path.join("Content/Graphics/ForegroundTiles.xml");
-        }
-        eprintln!("[TILE XML] Loading ForegroundTiles.xml from: {}", xml_path.display());
-        if xml_path.exists() {
-            let map = load_tileset_id_path_map(xml_path.to_str().unwrap());
-            eprintln!("[TILE XML] Loaded {} entries:", map.len());
-            for (id, path) in &map {
-                eprintln!("[TILE XML] id='{}' path='{}'", id, path);
+            #[cfg(not(target_os = "macos"))]
+            {
+                xml_path = xml_path.join("Content/Graphics/ForegroundTiles.xml");
             }
-            let _ = TILESET_ID_PATH_MAP.set(map);
+            eprintln!("[TILE XML] Loading ForegroundTiles.xml from: {}", xml_path.display());
+            if xml_path.exists() {
+                let map = load_tileset_id_path_map(xml_path.to_str().unwrap());
+                eprintln!("[TILE XML] Loaded {} foreground entries:", map.len());
+                for (id, path) in &map {
+                    eprintln!("[TILE XML] id='{}' path='{}'", id, path);
+                }
+                let _ = TILESET_ID_PATH_MAP_FG.set(map);
+            } else {
+                eprintln!("[TILE XML] ForegroundTiles.xml not found at {}", xml_path.display());
+            }
         } else {
-            eprintln!("[TILE XML] ForegroundTiles.xml not found at {}", xml_path.display());
+            eprintln!("[TILE XML] celeste_dir is None!");
         }
-    } else {
-        eprintln!("[TILE XML] celeste_dir is None!");
+    }
+
+    // Load background tileset map
+    if TILESET_ID_PATH_MAP_BG.get().is_none() {
+        if let Some(ref celeste_dir) = editor.celeste_assets.celeste_dir {
+            let mut xml_path = celeste_dir.clone();
+            #[cfg(target_os = "macos")]
+            {
+                if !xml_path.ends_with("Celeste.app") {
+                    xml_path = xml_path.join("Celeste.app");
+                }
+                xml_path = xml_path.join("Contents/Resources/Content/Graphics/BackgroundTiles.xml");
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                xml_path = xml_path.join("Content/Graphics/BackgroundTiles.xml");
+            }
+            eprintln!("[TILE XML] Loading BackgroundTiles.xml from: {}", xml_path.display());
+            if xml_path.exists() {
+                let map = load_tileset_id_path_map(xml_path.to_str().unwrap());
+                eprintln!("[TILE XML] Loaded {} background entries:", map.len());
+                for (id, path) in &map {
+                    eprintln!("[TILE XML] id='{}' path='{}'", id, path);
+                }
+                let _ = TILESET_ID_PATH_MAP_BG.set(map);
+            } else {
+                eprintln!("[TILE XML] BackgroundTiles.xml not found at {}", xml_path.display());
+            }
+        } else {
+            eprintln!("[TILE XML] celeste_dir is None!");
+        }
     }
 }
 
@@ -136,12 +169,12 @@ pub struct SetRule {
     pub tiles: Vec<(u32, u32)>,
 }
 
-/// Loads and caches all tileset definitions from ForegroundTiles.xml, including inherited rules via copy="z".
+/// Loads and caches all tileset definitions from ForegroundTiles.xml or BackgroundTiles.xml, including inherited rules via copy="z".
 pub fn get_tilesets_with_rules(xml_path: &str) -> &HashMap<char, Tileset> {
     TILESET_RULES.get_or_init(|| load_tilesets_with_rules(xml_path))
 }
 
-/// Loads all tileset definitions from ForegroundTiles.xml, including inherited rules via copy="z".
+/// Loads all tileset definitions from ForegroundTiles.xml or BackgroundTiles.xml, including inherited rules via copy="z".
 pub fn load_tilesets_with_rules(xml_path: &str) -> HashMap<char, Tileset> {
     let mut tilesets: HashMap<char, Tileset> = HashMap::new();
     let mut rules_by_id: HashMap<char, Vec<SetRule>> = HashMap::new();
