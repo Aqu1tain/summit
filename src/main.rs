@@ -8,6 +8,7 @@ mod assets;
 mod celeste_atlas;
 mod binary_reader;
 mod xnb_reader;
+mod tile_xml;
 
 fn main() {
     let options = eframe::NativeOptions::default();
