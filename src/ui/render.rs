@@ -15,6 +15,7 @@ pub const EXTERNAL_BORDER_COLOR: Color32 = Color32::from_rgb(220, 220, 220);
 pub const ROOM_CONTOUR_SELECTED: Color32 = Color32::from_rgb(110, 130, 170);
 pub const ROOM_CONTOUR_UNSELECTED: Color32 = Color32::from_rgb(60, 120, 220);
 
+const DECAL_SCALE: f32 = 1.0;
 // Culling threshold based on zoom level
 const CULLING_THRESHOLD_BASE: f32 = 50.0;
 
@@ -191,43 +192,104 @@ fn batch_render_tiles(
     }
 }
 
-
-/// Render decals
-fn render_fgdecals(
+fn render_bgdecals(
     editor: &mut CelesteMapEditor,
     painter: &egui::Painter,
     level: &serde_json::Value,
     scale: f32,
-    ctx: &egui::Context,
-    rx: f32,
-    ry: f32,
+    _ctx: &egui::Context,
+    room_x: f32, // = ld.x
+    room_y: f32, // = ld.y
 ) {
     if let Some(children) = level["__children"].as_array() {
-        for c in children {
-            if c["__name"]=="fgdecals" {
-                if let Some(decs) = c["__children"].as_array() {
-                    for d in decs {
-                        if d["__name"]=="decal" {
-                            let tex = d["texture"].as_str().unwrap_or("");
-                            let path = normalize_decal_path(tex);
-                            let x = d["x"].as_f64().unwrap_or(0.0) as f32;
-                            let y = d["y"].as_f64().unwrap_or(0.0) as f32;
-                            let sx = d["scaleX"].as_f64().unwrap_or(1.0) as f32;
-                            let sy = d["scaleY"].as_f64().unwrap_or(1.0) as f32;
-                            if let Some((_a, spr)) = crate::celeste_atlas::AtlasManager::get_sprite_global(&path) {
-                                let pos = Pos2::new((rx+x)*scale*editor.zoom_level-editor.camera_pos.x,
-                                                   (ry+y)*scale*editor.zoom_level-editor.camera_pos.y);
-                                let size=Vec2::new(spr.metadata.width as f32*sx*scale*editor.zoom_level,
-                                                   spr.metadata.height as f32*sy*scale*editor.zoom_level);
-                                crate::celeste_atlas::AtlasManager::draw_sprite(&editor.atlas_manager.as_ref().unwrap(),&spr,painter,Rect::from_min_size(pos,size),Color32::WHITE);
-                            }
-                        }
+        for c in children.iter().filter(|c| c["__name"] == "bgdecals") {
+            if let Some(decs) = c["__children"].as_array() {
+                for d in decs.iter().filter(|d| d["__name"] == "decal") {
+                    let path = normalize_decal_path(d["texture"].as_str().unwrap_or(""));
+                    let x    = d["x"].as_f64().unwrap_or(0.0)    as f32;
+                    let y    = d["y"].as_f64().unwrap_or(0.0)    as f32;
+                    let sx   = d["scaleX"].as_f64().unwrap_or(1.0) as f32;
+                    let sy   = d["scaleY"].as_f64().unwrap_or(1.0) as f32;
+
+                    if let Some(spr) = editor
+                        .atlas_manager
+                        .as_ref()
+                        .and_then(|am| am.get_sprite("Gameplay", &path))
+                    {
+                        // 1) centre du sprite en pixels-écran
+                        let center_x = (room_x + x) * scale * editor.zoom_level - editor.camera_pos.x;
+                        let center_y = (room_y + y) * scale * editor.zoom_level - editor.camera_pos.y;
+
+                        // 2) taille du sprite à l'écran
+                        let width_px  = spr.metadata.width  as f32 * sx * scale * editor.zoom_level * DECAL_SCALE;
+                        let height_px = spr.metadata.height as f32 * sy * scale * editor.zoom_level * DECAL_SCALE;
+
+                        // 3) rectangle centré
+                        let pos  = Pos2::new(center_x - width_px  * 0.5, center_y - height_px * 0.5);
+                        let size = Vec2::new(width_px, height_px);
+
+                        // 4) on dessine enfin le decal
+                        crate::celeste_atlas::AtlasManager::draw_sprite(
+                            &editor.atlas_manager.as_ref().unwrap(),
+                            &spr,
+                            painter,
+                            Rect::from_min_size(pos, size),
+                            Color32::WHITE,
+                        );
                     }
                 }
             }
         }
     }
 }
+
+fn render_fgdecals(
+    editor: &mut CelesteMapEditor,
+    painter: &egui::Painter,
+    level: &serde_json::Value,
+    scale: f32,
+    _ctx: &egui::Context,
+    room_x: f32, // = ld.x
+    room_y: f32, // = ld.y
+) {
+    if let Some(children) = level["__children"].as_array() {
+        for c in children.iter().filter(|c| c["__name"] == "fgdecals") {
+            if let Some(decs) = c["__children"].as_array() {
+                for d in decs.iter().filter(|d| d["__name"] == "decal") {
+                    let path = normalize_decal_path(d["texture"].as_str().unwrap_or(""));
+                    let x    = d["x"].as_f64().unwrap_or(0.0)    as f32;
+                    let y    = d["y"].as_f64().unwrap_or(0.0)    as f32;
+                    let sx   = d["scaleX"].as_f64().unwrap_or(1.0) as f32;
+                    let sy   = d["scaleY"].as_f64().unwrap_or(1.0) as f32;
+
+                    if let Some(spr) = editor
+                        .atlas_manager
+                        .as_ref()
+                        .and_then(|am| am.get_sprite("Gameplay", &path))
+                    {
+                        let center_x = (room_x + x) * scale * editor.zoom_level - editor.camera_pos.x;
+                        let center_y = (room_y + y) * scale * editor.zoom_level - editor.camera_pos.y;
+
+                        let width_px  = spr.metadata.width  as f32 * sx * scale * editor.zoom_level * DECAL_SCALE;
+                        let height_px = spr.metadata.height as f32 * sy * scale * editor.zoom_level * DECAL_SCALE;
+
+                        let pos  = Pos2::new(center_x - width_px  * 0.5, center_y - height_px * 0.5);
+                        let size = Vec2::new(width_px, height_px);
+
+                        crate::celeste_atlas::AtlasManager::draw_sprite(
+                            &editor.atlas_manager.as_ref().unwrap(),
+                            &spr,
+                            painter,
+                            Rect::from_min_size(pos, size),
+                            Color32::WHITE,
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 
 /// Draw grid lines
 fn draw_grid(painter: &egui::Painter, view: Rect, cam: Vec2, tile_size: f32, zoom: f32) {
@@ -245,7 +307,6 @@ fn draw_grid(painter: &egui::Painter, view: Rect, cam: Vec2, tile_size: f32, zoo
     }
 }
 
-/// Shared content renderer
 fn render_room_content(
     editor: &mut CelesteMapEditor,
     painter: &egui::Painter,
@@ -255,16 +316,28 @@ fn render_room_content(
     view: Rect,
     ctx: &egui::Context,
 ) {
-    // Tiles
+    // 1) échelle pour passer des pixels Celeste (8px) aux tiles de l'éditeur
+    let scale = TILE_SIZE / 8.0;
+
+    // 2) on applique offset_x/offset_y au coin haut‑gauche de la room
+    let base_x = ld.x;
+    let base_y = ld.y;
+    
+    // 3) on dessine les bg decals avec ce nouvel origin
+    render_bgdecals(editor, painter, json, scale, ctx, base_x, base_y);
+
+    // 4) les tuiles solides
     if editor.show_tiles {
         batch_render_tiles(editor, painter, ld, tile_size, view, ctx);
     }
-    // Decals
+
+    // 5) puis les fg decals, même origine
     if editor.show_fgdecals {
-        let scale = TILE_SIZE / 8.0;
-        render_fgdecals(editor, painter, json, scale, ctx, ld.x, ld.y);
+        render_fgdecals(editor, painter, json, scale, ctx, base_x, base_y);
     }
 }
+
+
 
 /// Draw outline and label
 fn render_room_outline_and_label(
@@ -377,7 +450,7 @@ fn render_top_panel(editor: &mut CelesteMapEditor, ctx: &egui::Context) {
             });
             ui.menu_button("View",|ui|{
                 let prev=editor.show_fgdecals;
-                if ui.checkbox(&mut editor.show_fgdecals,"Show Decals").changed(){ editor.static_dirty=true; }
+                if ui.checkbox(&mut editor.show_fgdecals,"Show Fg Decals").changed(){ editor.static_dirty=true; }
                 if ui.checkbox(&mut editor.show_tiles,"Show Tiles").changed(){ editor.static_dirty=true; }
                 ui.checkbox(&mut editor.show_all_rooms,"Show All Rooms");
                 ui.checkbox(&mut editor.show_grid,"Show Grid");
