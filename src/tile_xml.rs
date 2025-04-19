@@ -263,7 +263,7 @@ pub fn get_tileset_for_id(tilesets: &HashMap<char, Tileset>, id: char) -> Option
 /// Given a 3x3 grid of chars, and a mask, returns true if the mask matches the neighborhood.
 pub fn mask_matches(neighborhood: &[[char; 3]; 3], mask: &str, is_solid: &dyn Fn(char) -> bool, ignores: Option<&str>) -> bool {
     if mask == "center" {
-        // All tiles must be solid (including OOB)
+        // All tiles (including center) must be solid (including OOB)
         for row in 0..3 {
             for col in 0..3 {
                 let tile = neighborhood[row][col];

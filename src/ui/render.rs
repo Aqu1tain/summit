@@ -70,7 +70,7 @@ fn get_tile_color(tile_char: char) -> Option<Color32> {
 
 /// Is this a solid tile?
 fn is_solid_tile(c: char) -> bool {
-    matches!(c, '1' | '2' | '3' | '4')
+    c != '0'
 }
 
 /// Extract level data from JSON node.
