@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
-use std::path::PathBuf;
 use once_cell::sync::OnceCell;
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -116,4 +115,211 @@ pub fn ensure_tileset_id_path_map_loaded_from_celeste(editor: &CelesteMapEditor)
     } else {
         eprintln!("[TILE XML] celeste_dir is None!");
     }
+}
+
+// --- AUTOTILING DATA STRUCTURES ---
+static TILESET_RULES: OnceCell<HashMap<char, Tileset>> = OnceCell::new();
+
+#[derive(Debug, Clone)]
+pub struct Tileset {
+    #[allow(dead_code)]
+    pub id: char,
+    #[allow(dead_code)]
+    pub path: String,
+    pub ignores: Option<String>,
+    pub rules: Vec<SetRule>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SetRule {
+    pub mask: String,
+    pub tiles: Vec<(u32, u32)>,
+}
+
+/// Loads and caches all tileset definitions from ForegroundTiles.xml, including inherited rules via copy="z".
+pub fn get_tilesets_with_rules(xml_path: &str) -> &HashMap<char, Tileset> {
+    TILESET_RULES.get_or_init(|| load_tilesets_with_rules(xml_path))
+}
+
+/// Loads all tileset definitions from ForegroundTiles.xml, including inherited rules via copy="z".
+pub fn load_tilesets_with_rules(xml_path: &str) -> HashMap<char, Tileset> {
+    let mut tilesets: HashMap<char, Tileset> = HashMap::new();
+    let mut rules_by_id: HashMap<char, Vec<SetRule>> = HashMap::new();
+    let mut ignores_by_id: HashMap<char, Option<String>> = HashMap::new();
+    let mut path_by_id: HashMap<char, String> = HashMap::new();
+    let mut copy_map: HashMap<char, char> = HashMap::new();
+
+    let file = match File::open(xml_path) {
+        Ok(f) => f,
+        Err(_) => return tilesets,
+    };
+    let mut reader = Reader::from_reader(BufReader::new(file));
+    reader.trim_text(true);
+    let mut buf = Vec::new();
+    let mut current_id: Option<char> = None;
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) if e.name().as_ref() == b"Tileset" => {
+                let mut id: Option<char> = None;
+                let mut path: Option<String> = None;
+                let mut copy: Option<char> = None;
+                let mut ignores: Option<String> = None;
+                for attr in e.attributes().flatten() {
+                    match attr.key.as_ref() {
+                        b"id" => {
+                            if let Ok(val) = attr.unescape_value() {
+                                id = val.chars().next();
+                            }
+                        }
+                        b"path" => {
+                            if let Ok(val) = attr.unescape_value() {
+                                path = Some(val.to_string());
+                            }
+                        }
+                        b"copy" => {
+                            if let Ok(val) = attr.unescape_value() {
+                                copy = val.chars().next();
+                            }
+                        }
+                        b"ignores" => {
+                            if let Ok(val) = attr.unescape_value() {
+                                ignores = Some(val.to_string());
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if let Some(id_val) = id {
+                    current_id = Some(id_val);
+                    if let Some(path) = path.clone() {
+                        path_by_id.insert(id_val, path);
+                    }
+                    if let Some(copy_id) = copy {
+                        copy_map.insert(id_val, copy_id);
+                    }
+                    ignores_by_id.insert(id_val, ignores.clone());
+                    rules_by_id.entry(id_val).or_default();
+                }
+            }
+            Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) if e.name().as_ref() == b"set" => {
+                if let Some(_id) = current_id {
+                    let mut mask: Option<String> = None;
+                    let mut tiles: Vec<(u32, u32)> = vec![];
+                    for attr in e.attributes().flatten() {
+                        match attr.key.as_ref() {
+                            b"mask" => {
+                                if let Ok(val) = attr.unescape_value() {
+                                    mask = Some(val.to_string());
+                                }
+                            }
+                            b"tiles" => {
+                                if let Ok(val) = attr.unescape_value() {
+                                    for pair in val.split(';') {
+                                        let coords: Vec<&str> = pair.split(',').collect();
+                                        if coords.len() == 2 {
+                                            if let (Ok(x), Ok(y)) = (coords[0].trim().parse(), coords[1].trim().parse()) {
+                                                tiles.push((x, y));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    if let Some(mask) = mask {
+                        rules_by_id.entry(current_id.unwrap()).or_default().push(SetRule { mask, tiles });
+                    }
+                }
+            }
+            Ok(Event::End(ref e)) if e.name().as_ref() == b"Tileset" => {
+                current_id = None;
+            }
+            Ok(Event::Eof) => break,
+            Err(_) => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+    // Inherit rules from copy=... (e.g. copy="z")
+    for (id, copy_id) in &copy_map {
+        let base_rules = rules_by_id.get(copy_id).cloned().unwrap_or_default();
+        rules_by_id.entry(*id).or_default().extend(base_rules);
+    }
+    // Build Tileset structs
+    for (id, path) in path_by_id {
+        let rules = rules_by_id.remove(&id).unwrap_or_default();
+        let ignores = ignores_by_id.remove(&id).flatten();
+        tilesets.insert(id, Tileset { id, path, ignores, rules });
+    }
+    tilesets
+}
+
+/// Given a tile id, returns the Tileset struct (with inherited rules) from a preloaded map.
+pub fn get_tileset_for_id(tilesets: &HashMap<char, Tileset>, id: char) -> Option<&Tileset> {
+    tilesets.get(&id)
+}
+
+/// Given a 3x3 grid of chars, and a mask, returns true if the mask matches the neighborhood.
+pub fn mask_matches(neighborhood: &[[char; 3]; 3], mask: &str, is_solid: &dyn Fn(char) -> bool, ignores: Option<&str>) -> bool {
+    let mask_rows: Vec<&str> = mask.split('-').collect();
+    if mask_rows.len() != 3 { return false; }
+    for (y, mask_row) in mask_rows.iter().enumerate() {
+        let mask_chars: Vec<char> = mask_row.chars().collect();
+        if mask_chars.len() != 3 { return false; }
+        for (x, m) in mask_chars.iter().enumerate() {
+            let tile = neighborhood[y][x];
+            match m {
+                '0' => {
+                    // Must be empty
+                    if is_solid(tile) && ignores.map_or(true, |ign| !ign.contains(tile)) {
+                        return false;
+                    }
+                }
+                '1' => {
+                    // Must be solid
+                    if !(is_solid(tile) && ignores.map_or(true, |ign| !ign.contains(tile))) {
+                        return false;
+                    }
+                }
+                'x' | 'X' => {
+                    // Wildcard, matches anything
+                }
+                _ => {}
+            }
+        }
+    }
+    true
+}
+
+/// Given the tile map and coordinates, extracts the 3x3 neighborhood for autotiling.
+pub fn get_neighborhood(solids: &Vec<Vec<char>>, x: usize, y: usize) -> [[char; 3]; 3] {
+    let mut n = [[' '; 3]; 3];
+    for dy in 0..3 {
+        for dx in 0..3 {
+            let nx = x as isize + dx as isize - 1;
+            let ny = y as isize + dy as isize - 1;
+            n[dy][dx] = if ny >= 0 && nx >= 0 && (ny as usize) < solids.len() && (nx as usize) < solids[ny as usize].len() {
+                solids[ny as usize][nx as usize]
+            } else {
+                '0' // treat out-of-bounds as empty
+            };
+        }
+    }
+    n
+}
+
+/// Main autotiling entry: given tile id, solids, x, y, and tilesets, returns the tile coordinate to use.
+pub fn autotile_tile_coord(tile_id: char, solids: &Vec<Vec<char>>, x: usize, y: usize, tilesets: &HashMap<char, Tileset>, is_solid: &dyn Fn(char) -> bool) -> Option<(u32, u32)> {
+    let tileset = get_tileset_for_id(tilesets, tile_id)?;
+    let n = get_neighborhood(solids, x, y);
+    for rule in &tileset.rules {
+        if mask_matches(&n, &rule.mask, is_solid, tileset.ignores.as_deref()) {
+            // Deterministic selection based on position for variety
+            let idx = ((x as u64 * 31 + y as u64 * 17) % rule.tiles.len() as u64) as usize;
+            return Some(rule.tiles[idx]);
+        }
+    }
+    // Fallback: top-left
+    Some((0, 0))
 }

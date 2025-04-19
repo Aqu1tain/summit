@@ -4,7 +4,7 @@ use eframe::egui;
 use egui::{Color32, Pos2, Rect, Stroke, Vec2};
 use crate::app::CelesteMapEditor;
 use crate::map::loader::{save_map, save_map_as};
-use crate::tile_xml::{load_tileset_id_path_map, get_tileset_path_for_id, ensure_tileset_id_path_map_loaded_from_celeste, get_first_tile_coords_for_id_or_default};
+use crate::tile_xml::{load_tileset_id_path_map, get_tileset_path_for_id, ensure_tileset_id_path_map_loaded_from_celeste, get_first_tile_coords_for_id_or_default, get_tilesets_with_rules};
 use crate::celeste_atlas::AtlasManager;
 
 // Constants
@@ -186,22 +186,23 @@ fn render_tile(
             } else {
                 String::new()
             };
-            // Always use (0,0) as the default tile
-            let (tile_x, tile_y) = crate::tile_xml::get_first_tile_coords_for_id_or_default(&xml_path, tile);
-            // Calculate the subregion for this tile (8x8 region)
-            let region = egui::Rect::from_min_size(
-                egui::Pos2::new((tile_x * 8) as f32, (tile_y * 8) as f32),
-                egui::Vec2::new(8.0, 8.0),
-            );
-            if let Some(atlas_mgr) = &editor.atlas_manager {
-                let sprite_path = format!("tilesets/{}", path);
-                match atlas_mgr.get_sprite("Gameplay", &sprite_path) {
-                    Some(sprite) => {
-                        // Draw only the subregion (first tile)
-                        atlas_mgr.draw_sprite_region(sprite, painter, rect, Color32::WHITE, region);
-                        drew_texture = true;
+            // --- AUTOTILING ---
+            let tilesets = get_tilesets_with_rules(&xml_path);
+            let is_solid = |c: char| is_solid_tile(c);
+            if let Some((tile_x, tile_y)) = crate::tile_xml::autotile_tile_coord(tile, solids, x, y, tilesets, &is_solid) {
+                let region = egui::Rect::from_min_size(
+                    egui::Pos2::new((tile_x * 8) as f32, (tile_y * 8) as f32),
+                    egui::Vec2::new(8.0, 8.0),
+                );
+                if let Some(atlas_mgr) = &editor.atlas_manager {
+                    let sprite_path = format!("tilesets/{}", path);
+                    match atlas_mgr.get_sprite("Gameplay", &sprite_path) {
+                        Some(sprite) => {
+                            atlas_mgr.draw_sprite_region(sprite, painter, rect, Color32::WHITE, region);
+                            drew_texture = true;
+                        }
+                        None => {}
                     }
-                    None => {}
                 }
             }
         }
