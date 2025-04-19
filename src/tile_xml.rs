@@ -262,6 +262,45 @@ pub fn get_tileset_for_id(tilesets: &HashMap<char, Tileset>, id: char) -> Option
 
 /// Given a 3x3 grid of chars, and a mask, returns true if the mask matches the neighborhood.
 pub fn mask_matches(neighborhood: &[[char; 3]; 3], mask: &str, is_solid: &dyn Fn(char) -> bool, ignores: Option<&str>) -> bool {
+    if mask == "center" {
+        // All tiles must be solid (including OOB)
+        for row in 0..3 {
+            for col in 0..3 {
+                let tile = neighborhood[row][col];
+                if tile == '\0' {
+                    continue; // OOB is solid
+                }
+                if !is_solid(tile) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+    if mask == "padding" {
+        // Center solid, all 8 neighbors solid (including OOB)
+        let center = neighborhood[1][1];
+        if center == '\0' {
+            // OOB center should not happen, but treat as solid
+        } else if !is_solid(center) {
+            return false;
+        }
+        for row in 0..3 {
+            for col in 0..3 {
+                if row == 1 && col == 1 { continue; }
+                let tile = neighborhood[row][col];
+                if tile == '\0' {
+                    continue; // OOB is solid
+                }
+                if !is_solid(tile) {
+                    return false;
+                }
+            }
+        }
+        // 2-away orthogonal check is enforced in autotile_tile_coord.
+        return true;
+    }
+    // Default: explicit mask parsing
     let mask_rows: Vec<&str> = mask.split('-').collect();
     if mask_rows.len() != 3 { return false; }
     for (y, mask_row) in mask_rows.iter().enumerate() {
@@ -269,16 +308,17 @@ pub fn mask_matches(neighborhood: &[[char; 3]; 3], mask: &str, is_solid: &dyn Fn
         if mask_chars.len() != 3 { return false; }
         for (x, m) in mask_chars.iter().enumerate() {
             let tile = neighborhood[y][x];
+            let oob = tile == '\0';
             match m {
                 '0' => {
                     // Must be empty
-                    if is_solid(tile) && ignores.map_or(true, |ign| !ign.contains(tile)) {
+                    if (is_solid(tile) && ignores.map_or(true, |ign| !ign.contains(tile))) || oob {
                         return false;
                     }
                 }
                 '1' => {
                     // Must be solid
-                    if !(is_solid(tile) && ignores.map_or(true, |ign| !ign.contains(tile))) {
+                    if !(is_solid(tile) && ignores.map_or(true, |ign| !ign.contains(tile))) && !oob {
                         return false;
                     }
                 }
@@ -294,32 +334,102 @@ pub fn mask_matches(neighborhood: &[[char; 3]; 3], mask: &str, is_solid: &dyn Fn
 
 /// Given the tile map and coordinates, extracts the 3x3 neighborhood for autotiling.
 pub fn get_neighborhood(solids: &Vec<Vec<char>>, x: usize, y: usize) -> [[char; 3]; 3] {
-    let mut n = [[' '; 3]; 3];
-    for dy in 0..3 {
-        for dx in 0..3 {
-            let nx = x as isize + dx as isize - 1;
-            let ny = y as isize + dy as isize - 1;
-            n[dy][dx] = if ny >= 0 && nx >= 0 && (ny as usize) < solids.len() && (nx as usize) < solids[ny as usize].len() {
-                solids[ny as usize][nx as usize]
-            } else {
-                '0' // treat out-of-bounds as empty
-            };
+    let mut n = [['\0'; 3]; 3];
+    let h = solids.len() as isize;
+    let w = if h > 0 { solids[0].len() as isize } else { 0 };
+    for dy in -1..=1 {
+        for dx in -1..=1 {
+            let nx = x as isize + dx;
+            let ny = y as isize + dy;
+            if nx >= 0 && ny >= 0 && ny < h {
+                let nyu = ny as usize;
+                if nyu < solids.len() {
+                    let row = &solids[nyu];
+                    if nx < row.len() as isize && nx >= 0 {
+                        n[(dy + 1) as usize][(dx + 1) as usize] = row[nx as usize];
+                        continue;
+                    }
+                }
+            }
+            n[(dy + 1) as usize][(dx + 1) as usize] = '\0';
         }
     }
     n
+}
+
+/// Helper for padding: check 2-away orthogonal neighbors for air
+fn has_orthogonal_air(solids: &Vec<Vec<char>>, x: usize, y: usize, is_solid: &dyn Fn(char) -> bool) -> bool {
+    let offsets = [(-2, 0), (2, 0), (0, -2), (0, 2)];
+    let h = solids.len() as isize;
+    let w = if h > 0 { solids[0].len() as isize } else { 0 };
+    for (dx, dy) in offsets.iter() {
+        let nx = x as isize + dx;
+        let ny = y as isize + dy;
+        // Out of bounds is counted as solid
+        if nx < 0 || ny < 0 || ny >= h || nx >= w {
+            continue;
+        }
+        if (ny as usize) >= solids.len() {
+            continue;
+        }
+        let row = &solids[ny as usize];
+        if (nx as usize) >= row.len() {
+            continue;
+        }
+        if !is_solid(row[nx as usize]) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Main autotiling entry: given tile id, solids, x, y, and tilesets, returns the tile coordinate to use.
 pub fn autotile_tile_coord(tile_id: char, solids: &Vec<Vec<char>>, x: usize, y: usize, tilesets: &HashMap<char, Tileset>, is_solid: &dyn Fn(char) -> bool) -> Option<(u32, u32)> {
     let tileset = get_tileset_for_id(tilesets, tile_id)?;
     let n = get_neighborhood(solids, x, y);
+    // 1. Explicit masks (not "padding" or "center") in order
     for rule in &tileset.rules {
-        if mask_matches(&n, &rule.mask, is_solid, tileset.ignores.as_deref()) {
-            // Deterministic selection based on position for variety
+        if rule.mask != "padding" && rule.mask != "center" {
+            if mask_matches(&n, &rule.mask, is_solid, tileset.ignores.as_deref()) {
+                if !rule.tiles.is_empty() {
+                    let idx = ((x as u64 * 31 + y as u64 * 17) % rule.tiles.len() as u64) as usize;
+                    return Some(rule.tiles[idx]);
+                }
+            }
+        }
+    }
+    // 2. Fallback: "padding" (before center)
+    let mut padding_rule: Option<&SetRule> = None;
+    for rule in &tileset.rules {
+        if rule.mask == "padding" {
+            if mask_matches(&n, &rule.mask, is_solid, tileset.ignores.as_deref()) && has_orthogonal_air(solids, x, y, is_solid) {
+                padding_rule = Some(rule);
+                break;
+            }
+        }
+    }
+    if let Some(rule) = padding_rule {
+        if !rule.tiles.is_empty() {
             let idx = ((x as u64 * 31 + y as u64 * 17) % rule.tiles.len() as u64) as usize;
             return Some(rule.tiles[idx]);
         }
     }
-    // Fallback: top-left
+    // 3. Fallback: "center"
+    let mut center_rule: Option<&SetRule> = None;
+    for rule in &tileset.rules {
+        if rule.mask == "center" {
+            if mask_matches(&n, &rule.mask, is_solid, tileset.ignores.as_deref()) {
+                center_rule = Some(rule);
+                break;
+            }
+        }
+    }
+    if let Some(rule) = center_rule {
+        if !rule.tiles.is_empty() {
+            let idx = ((x as u64 * 31 + y as u64 * 17) % rule.tiles.len() as u64) as usize;
+            return Some(rule.tiles[idx]);
+        }
+    }
+    // 4. Fallback: top-left
     Some((0, 0))
 }
