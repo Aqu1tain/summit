@@ -30,7 +30,7 @@ pub struct LevelRenderData {
     pub width: f32,
     pub height: f32,
     pub solids: Vec<Vec<char>>,
-    pub bg: Vec<Vec<char>>, // NEW: background tiles
+    pub bg: Vec<Vec<char>>,
     pub offset_x: i32,
     pub offset_y: i32,
     pub autotile_coords: Vec<Vec<Option<(u32, u32)>>>, // cache for autotiling (foreground)
@@ -128,46 +128,46 @@ fn normalize_decal_path(texture: &str) -> String {
     key
 }
 
-/// Render a single tile (filled + borders) using the passed LevelRenderData
-fn render_tile(
+/// Generic tile rendering for fg/bg
+fn render_any_tile(
     painter: &egui::Painter,
     ld: &LevelRenderData,
     editor: &CelesteMapEditor,
+    tiles: &Vec<Vec<char>>,
+    autotile_coords: &[Vec<Option<(u32, u32)>>],
     x: usize,
     y: usize,
     tile: char,
     tile_size: f32,
     visible: bool,
+    is_air_or_empty: &dyn Fn(char) -> bool,
+    infill_color: Color32,
+    tileset_id_path_map: Option<&std::collections::HashMap<char, String>>,
+    xml_path: &str,
+    debug_tag: &str,
 ) {
-    // Ensure tileset mapping is loaded from Celeste assets (once per session)
-    ensure_tileset_id_path_map_loaded_from_celeste(editor);
     // TEMP DEBUG: print mapping status for first tile
     if x == 0 && y == 0 {
-        let map = crate::tile_xml::TILESET_ID_PATH_MAP_FG.get();
-        eprintln!("[TILE DEBUG] tile char: {}", tile);
-        if let Some(map) = map {
+        eprintln!("[{} TILE DEBUG] tile char: {}", debug_tag, tile);
+        if let Some(map) = tileset_id_path_map {
             if let Some(path) = get_tileset_path_for_id(map, tile) {
-                eprintln!("[TILE DEBUG] tileset path for '{}': {}", tile, path);
+                eprintln!("[{} TILE DEBUG] tileset path for '{}': {}", debug_tag, tile, path);
                 let sprite_path = format!("tilesets/{}", path);
-                eprintln!("[TILE DEBUG] sprite_path: {}", sprite_path);
+                eprintln!("[{} TILE DEBUG] sprite_path: {}", debug_tag, sprite_path);
                 if let Some(atlas_mgr) = &editor.atlas_manager {
                     let found = atlas_mgr.get_sprite("Gameplay", &sprite_path).is_some();
-                    eprintln!("[TILE DEBUG] atlas get_sprite('{}'): {}", sprite_path, found);
+                    eprintln!("[{} TILE DEBUG] atlas get_sprite('{}'): {}", debug_tag, sprite_path, found);
                 } else {
-                    eprintln!("[TILE DEBUG] atlas_manager is None");
+                    eprintln!("[{} TILE DEBUG] atlas_manager is None", debug_tag);
                 }
             } else {
-                eprintln!("[TILE DEBUG] No tileset path for '{}'", tile);
+                eprintln!("[{} TILE DEBUG] No tileset path for '{}'", debug_tag, tile);
             }
         } else {
-            eprintln!("[TILE DEBUG] TILESET_ID_PATH_MAP_FG is None");
+            eprintln!("[{} TILE DEBUG] TILESET_ID_PATH_MAP is None", debug_tag);
         }
     }
     if !visible || tile == '0' || tile == ' ' {
-        return;
-    }
-    let solids = &ld.solids;
-    if y >= solids.len() || x >= solids[y].len() {
         return;
     }
     let scale = TILE_SIZE / 8.0;
@@ -180,7 +180,7 @@ fn render_tile(
 
     // Infill check
     let mut internal = true;
-    let max_y = solids.len();
+    let max_y = tiles.len();
     for dy in -1..=1 {
         for dx in -1..=1 {
             if dx == 0 && dy == 0 { continue; }
@@ -189,19 +189,18 @@ fn render_tile(
             if ny < 0 || nx < 0 || ny as usize >= max_y {
                 continue;
             }
-            let row = &solids[ny as usize];
-            if nx as usize >= row.len() || !is_solid_tile(row[nx as usize]) {
+            let row = &tiles[ny as usize];
+            if nx as usize >= row.len() || is_air_or_empty(row[nx as usize]) {
                 internal = false;
                 break;
             }
         }
         if !internal { break; }
     }
-    let map = crate::tile_xml::TILESET_ID_PATH_MAP_FG.get();
     let mut drew_texture = false;
-    if !ld.autotile_coords.is_empty() {
-        if let Some(coord) = ld.autotile_coords.get(y).and_then(|row| row.get(x)).and_then(|v| *v) {
-            if let Some(map) = map {
+    if !autotile_coords.is_empty() {
+        if let Some(coord) = autotile_coords.get(y).and_then(|row| row.get(x)).and_then(|v| *v) {
+            if let Some(map) = tileset_id_path_map {
                 if let Some(path) = get_tileset_path_for_id(map, tile) {
                     let region = egui::Rect::from_min_size(
                         egui::Pos2::new((coord.0 * 8) as f32, (coord.1 * 8) as f32),
@@ -209,12 +208,9 @@ fn render_tile(
                     );
                     if let Some(atlas_mgr) = &editor.atlas_manager {
                         let sprite_path = format!("tilesets/{}", path);
-                        match atlas_mgr.get_sprite("Gameplay", &sprite_path) {
-                            Some(sprite) => {
-                                atlas_mgr.draw_sprite_region(sprite, painter, rect, Color32::WHITE, region);
-                                drew_texture = true;
-                            }
-                            None => {}
+                        if let Some(sprite) = atlas_mgr.get_sprite("Gameplay", &sprite_path) {
+                            atlas_mgr.draw_sprite_region(sprite, painter, rect, Color32::WHITE, region);
+                            drew_texture = true;
                         }
                     }
                 }
@@ -222,39 +218,19 @@ fn render_tile(
         }
     } else {
         // fallback: recompute on the fly (shouldn't happen)
-        if let Some(map) = map {
+        if let Some(map) = tileset_id_path_map {
             if let Some(path) = get_tileset_path_for_id(map, tile) {
-                let xml_path = if let Some(ref celeste_dir) = editor.celeste_assets.celeste_dir {
-                    #[cfg(target_os = "macos")]
-                    {
-                        let mut p = celeste_dir.clone();
-                        if !p.ends_with("Celeste.app") {
-                            p = p.join("Celeste.app");
-                        }
-                        p.join("Contents/Resources/Content/Graphics/ForegroundTiles.xml").to_string_lossy().to_string()
-                    }
-                    #[cfg(not(target_os = "macos") )]
-                    {
-                        celeste_dir.join("Content/Graphics/ForegroundTiles.xml").to_string_lossy().to_string()
-                    }
-                } else {
-                    String::new()
-                };
-                let tilesets = crate::tile_xml::get_tilesets_with_rules(&xml_path);
-                let is_solid = |c: char| is_solid_tile(c);
-                if let Some((tile_x, tile_y)) = crate::tile_xml::autotile_tile_coord(tile, solids, x, y, tilesets, &is_solid) {
+                let tilesets = crate::tile_xml::get_tilesets_with_rules(xml_path);
+                if let Some((tile_x, tile_y)) = crate::tile_xml::autotile_tile_coord(tile, tiles, x, y, tilesets, &|c| !is_air_or_empty(c)) {
                     let region = egui::Rect::from_min_size(
                         egui::Pos2::new((tile_x * 8) as f32, (tile_y * 8) as f32),
                         egui::Vec2::new(8.0, 8.0),
                     );
                     if let Some(atlas_mgr) = &editor.atlas_manager {
                         let sprite_path = format!("tilesets/{}", path);
-                        match atlas_mgr.get_sprite("Gameplay", &sprite_path) {
-                            Some(sprite) => {
-                                atlas_mgr.draw_sprite_region(sprite, painter, rect, Color32::WHITE, region);
-                                drew_texture = true;
-                            }
-                            None => {}
+                        if let Some(sprite) = atlas_mgr.get_sprite("Gameplay", &sprite_path) {
+                            atlas_mgr.draw_sprite_region(sprite, painter, rect, Color32::WHITE, region);
+                            drew_texture = true;
                         }
                     }
                 }
@@ -262,29 +238,91 @@ fn render_tile(
         }
     }
     if !drew_texture {
-        eprintln!("[TILE DEBUG] drew fallback color for '{}'", tile);
+        eprintln!("[{} TILE DEBUG] drew fallback color for '{}'", debug_tag, tile);
         // Fallback: draw colored rect
-        let color = get_tile_color(tile).unwrap_or(SOLID_TILE_COLOR);
+        let color = get_tile_color(tile).unwrap_or(infill_color);
         painter.rect_filled(rect, 0.0, color);
 
         // External borders
         // Up
-        if !(y > 0 && x < solids[y-1].len() && is_solid_tile(solids[y-1][x])) {
+        if !(y > 0 && x < tiles[y-1].len() && !is_air_or_empty(tiles[y-1][x])) {
             painter.rect_filled(Rect::from_min_size(Pos2::new(pos.x, pos.y - 1.0), Vec2::new(tile_size, 1.0)), 0.0, EXTERNAL_BORDER_COLOR);
         }
         // Down
-        if !(y + 1 < max_y && x < solids[y+1].len() && is_solid_tile(solids[y+1][x])) {
+        if !(y + 1 < max_y && x < tiles[y+1].len() && !is_air_or_empty(tiles[y+1][x])) {
             painter.rect_filled(Rect::from_min_size(Pos2::new(pos.x, pos.y + tile_size), Vec2::new(tile_size, 1.0)), 0.0, EXTERNAL_BORDER_COLOR);
         }
         // Left
-        if !(x > 0 && x - 1 < solids[y].len() && is_solid_tile(solids[y][x-1])) {
+        if !(x > 0 && x - 1 < tiles[y].len() && !is_air_or_empty(tiles[y][x-1])) {
             painter.rect_filled(Rect::from_min_size(Pos2::new(pos.x - 1.0, pos.y), Vec2::new(1.0, tile_size)), 0.0, EXTERNAL_BORDER_COLOR);
         }
         // Right
-        if !(x + 1 < solids[y].len() && is_solid_tile(solids[y][x+1])) {
+        if !(x + 1 < tiles[y].len() && !is_air_or_empty(tiles[y][x+1])) {
             painter.rect_filled(Rect::from_min_size(Pos2::new(pos.x + tile_size, pos.y), Vec2::new(1.0, tile_size)), 0.0, EXTERNAL_BORDER_COLOR);
         }
     }
+}
+
+/// Render a single tile (filled + borders) using the passed LevelRenderData
+fn render_tile(
+    painter: &egui::Painter,
+    ld: &LevelRenderData,
+    editor: &CelesteMapEditor,
+    x: usize,
+    y: usize,
+    tile: char,
+    tile_size: f32,
+    visible: bool,
+) {
+    ensure_tileset_id_path_map_loaded_from_celeste(editor);
+    render_any_tile(
+        painter,
+        ld,
+        editor,
+        &ld.solids,
+        &ld.autotile_coords,
+        x,
+        y,
+        tile,
+        tile_size,
+        visible,
+        &|c| !is_solid_tile(c),
+        SOLID_TILE_COLOR,
+        crate::tile_xml::TILESET_ID_PATH_MAP_FG.get(),
+        &get_celeste_fgtiles_xml_path_from_editor(editor),
+        "FG",
+    );
+}
+
+/// Render a single background tile (filled + borders) using the passed LevelRenderData
+fn render_bg_tile(
+    painter: &egui::Painter,
+    ld: &LevelRenderData,
+    editor: &CelesteMapEditor,
+    x: usize,
+    y: usize,
+    tile: char,
+    tile_size: f32,
+    visible: bool,
+) {
+    ensure_tileset_id_path_map_loaded_from_celeste(editor);
+    render_any_tile(
+        painter,
+        ld,
+        editor,
+        &ld.bg,
+        &ld.bg_autotile_coords,
+        x,
+        y,
+        tile,
+        tile_size,
+        visible,
+        &|c| c == '0',
+        INFILL_COLOR,
+        crate::tile_xml::TILESET_ID_PATH_MAP_BG.get(),
+        &get_celeste_bgtiles_xml_path_from_editor(editor),
+        "BG",
+    );
 }
 
 /// Batch render tiles
@@ -364,166 +402,6 @@ fn batch_render_bg_tiles(
             if xx >= ld.bg[yy].len() { continue; }
             let tile = ld.bg[yy][xx];
             render_bg_tile(painter, ld, editor, xx, yy, tile, tile_size, true);
-        }
-    }
-}
-
-/// Render a single background tile (filled + borders) using the passed LevelRenderData
-fn render_bg_tile(
-    painter: &egui::Painter,
-    ld: &LevelRenderData,
-    editor: &CelesteMapEditor,
-    x: usize,
-    y: usize,
-    tile: char,
-    tile_size: f32,
-    visible: bool,
-) {
-    // Ensure tileset mapping is loaded from Celeste assets (once per session)
-    ensure_tileset_id_path_map_loaded_from_celeste(editor);
-    // TEMP DEBUG: print mapping status for first tile
-    if x == 0 && y == 0 {
-        let map = crate::tile_xml::TILESET_ID_PATH_MAP_BG.get();
-        eprintln!("[BG TILE DEBUG] tile char: {}", tile);
-        if let Some(map) = map {
-            if let Some(path) = get_tileset_path_for_id(map, tile) {
-                eprintln!("[BG TILE DEBUG] tileset path for '{}': {}", tile, path);
-                let sprite_path = format!("tilesets/{}", path);
-                eprintln!("[BG TILE DEBUG] sprite_path: {}", sprite_path);
-                if let Some(atlas_mgr) = &editor.atlas_manager {
-                    let found = atlas_mgr.get_sprite("Gameplay", &sprite_path).is_some();
-                    eprintln!("[BG TILE DEBUG] atlas get_sprite('{}'): {}", sprite_path, found);
-                } else {
-                    eprintln!("[BG TILE DEBUG] atlas_manager is None");
-                }
-            } else {
-                eprintln!("[BG TILE DEBUG] No tileset path for '{}'", tile);
-            }
-        } else {
-            eprintln!("[BG TILE DEBUG] TILESET_ID_PATH_MAP_BG is None");
-        }
-    }
-    if !visible || tile == '0' || tile == ' ' {
-        return;
-    }
-    let bg = &ld.bg;
-    if y >= bg.len() || x >= bg[y].len() {
-        return;
-    }
-    let scale = TILE_SIZE / 8.0;
-    let world_x0 = (ld.x + ld.offset_x as f32) * scale * editor.zoom_level;
-    let world_y0 = (ld.y + ld.offset_y as f32) * scale * editor.zoom_level;
-    let px = world_x0 + x as f32 * tile_size - editor.camera_pos.x;
-    let py = world_y0 + y as f32 * tile_size - editor.camera_pos.y;
-    let pos = Pos2::new(px, py);
-    let rect = Rect::from_min_size(pos, Vec2::splat(tile_size));
-
-    // Infill check
-    let mut internal = true;
-    let max_y = bg.len();
-    let is_air = |c: char| c == '0';
-    for dy in -1..=1 {
-        for dx in -1..=1 {
-            if dx == 0 && dy == 0 { continue; }
-            let ny = y as isize + dy;
-            let nx = x as isize + dx;
-            if ny < 0 || nx < 0 || ny as usize >= max_y {
-                continue;
-            }
-            let row = &bg[ny as usize];
-            if nx as usize >= row.len() || is_air(row[nx as usize]) {
-                internal = false;
-                break;
-            }
-        }
-        if !internal { break; }
-    }
-    let map = crate::tile_xml::TILESET_ID_PATH_MAP_BG.get();
-    let mut drew_texture = false;
-    if !ld.bg_autotile_coords.is_empty() {
-        if let Some(coord) = ld.bg_autotile_coords.get(y).and_then(|row| row.get(x)).and_then(|v| *v) {
-            if let Some(map) = map {
-                if let Some(path) = get_tileset_path_for_id(map, tile) {
-                    let region = egui::Rect::from_min_size(
-                        egui::Pos2::new((coord.0 * 8) as f32, (coord.1 * 8) as f32),
-                        egui::Vec2::new(8.0, 8.0),
-                    );
-                    if let Some(atlas_mgr) = &editor.atlas_manager {
-                        let sprite_path = format!("tilesets/{}", path);
-                        match atlas_mgr.get_sprite("Gameplay", &sprite_path) {
-                            Some(sprite) => {
-                                atlas_mgr.draw_sprite_region(sprite, painter, rect, Color32::WHITE, region);
-                                drew_texture = true;
-                            }
-                            None => {}
-                        }
-                    }
-                }
-            }
-        }
-    } else {
-        // Fallback: recompute on the fly (shouldn't happen)
-        if let Some(map) = map {
-            if let Some(path) = get_tileset_path_for_id(map, tile) {
-                let xml_path = if let Some(ref celeste_dir) = editor.celeste_assets.celeste_dir {
-                    #[cfg(target_os = "macos")]
-                    {
-                        let mut p = celeste_dir.clone();
-                        if !p.ends_with("Celeste.app") {
-                            p = p.join("Celeste.app");
-                        }
-                        p.join("Contents/Resources/Content/Graphics/BackgroundTiles.xml").to_string_lossy().to_string()
-                    }
-                    #[cfg(not(target_os = "macos") )]
-                    {
-                        celeste_dir.join("Content/Graphics/BackgroundTiles.xml").to_string_lossy().to_string()
-                    }
-                } else {
-                    String::new()
-                };
-                let tilesets = crate::tile_xml::get_tilesets_with_rules(&xml_path);
-                let is_air = |c: char| c == '0';
-                if let Some((tile_x, tile_y)) = crate::tile_xml::autotile_tile_coord(tile, bg, x, y, tilesets, &|c| !is_air(c)) {
-                    let region = egui::Rect::from_min_size(
-                        egui::Pos2::new((tile_x * 8) as f32, (tile_y * 8) as f32),
-                        egui::Vec2::new(8.0, 8.0),
-                    );
-                    if let Some(atlas_mgr) = &editor.atlas_manager {
-                        let sprite_path = format!("tilesets/{}", path);
-                        match atlas_mgr.get_sprite("Gameplay", &sprite_path) {
-                            Some(sprite) => {
-                                atlas_mgr.draw_sprite_region(sprite, painter, rect, Color32::WHITE, region);
-                                drew_texture = true;
-                            }
-                            None => {}
-                        }
-                    }
-                }
-            }
-        }
-    }
-    if !drew_texture {
-        eprintln!("[BG TILE DEBUG] drew fallback color for '{}'", tile);
-        // Fallback: draw colored rect
-        let color = get_tile_color(tile).unwrap_or(INFILL_COLOR);
-        painter.rect_filled(rect, 0.0, color);
-
-        // External borders
-        // Up
-        if !(y > 0 && x < bg[y-1].len() && !is_air(bg[y-1][x])) {
-            painter.rect_filled(Rect::from_min_size(Pos2::new(pos.x, pos.y - 1.0), Vec2::new(tile_size, 1.0)), 0.0, EXTERNAL_BORDER_COLOR);
-        }
-        // Down
-        if !(y + 1 < max_y && x < bg[y+1].len() && !is_air(bg[y+1][x])) {
-            painter.rect_filled(Rect::from_min_size(Pos2::new(pos.x, pos.y + tile_size), Vec2::new(tile_size, 1.0)), 0.0, EXTERNAL_BORDER_COLOR);
-        }
-        // Left
-        if !(x > 0 && x - 1 < bg[y].len() && !is_air(bg[y][x-1])) {
-            painter.rect_filled(Rect::from_min_size(Pos2::new(pos.x - 1.0, pos.y), Vec2::new(1.0, tile_size)), 0.0, EXTERNAL_BORDER_COLOR);
-        }
-        // Right
-        if !(x + 1 < bg[y].len() && !is_air(bg[y][x+1])) {
-            painter.rect_filled(Rect::from_min_size(Pos2::new(pos.x + tile_size, pos.y), Vec2::new(1.0, tile_size)), 0.0, EXTERNAL_BORDER_COLOR);
         }
     }
 }
