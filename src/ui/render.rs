@@ -6,6 +6,7 @@ use crate::app::CelesteMapEditor;
 use crate::map::loader::{save_map, save_map_as};
 use crate::tile_xml::{load_tileset_id_path_map, get_tileset_path_for_id, ensure_tileset_id_path_map_loaded_from_celeste, get_first_tile_coords_for_id_or_default, get_tilesets_with_rules};
 use crate::celeste_atlas::AtlasManager;
+use log::debug;
 
 // Constants
 pub const TILE_SIZE: f32 = 20.0;
@@ -158,23 +159,30 @@ fn render_any_tile(
 ) {
     // TEMP DEBUG: print mapping status for first tile
     if x == 0 && y == 0 {
-        eprintln!("[{} TILE DEBUG] tile char: {}", debug_tag, tile);
+        #[cfg(debug_assertions)]
+        debug!("[{} TILE DEBUG] tile char: {}", debug_tag, tile);
         if let Some(map) = tileset_id_path_map {
             if let Some(path) = get_tileset_path_for_id(map, tile) {
-                eprintln!("[{} TILE DEBUG] tileset path for '{}': {}", debug_tag, tile, path);
+                #[cfg(debug_assertions)]
+                debug!("[{} TILE DEBUG] tileset path for '{}': {}", debug_tag, tile, path);
                 let sprite_path = format!("tilesets/{}", path);
-                eprintln!("[{} TILE DEBUG] sprite_path: {}", debug_tag, sprite_path);
+                #[cfg(debug_assertions)]
+                debug!("[{} TILE DEBUG] sprite_path: {}", debug_tag, sprite_path);
                 if let Some(atlas_mgr) = &editor.atlas_manager {
                     let found = atlas_mgr.get_sprite("Gameplay", &sprite_path).is_some();
-                    eprintln!("[{} TILE DEBUG] atlas get_sprite('{}'): {}", debug_tag, sprite_path, found);
+                    #[cfg(debug_assertions)]
+                    debug!("[{} TILE DEBUG] atlas get_sprite('{}'): {}", debug_tag, sprite_path, found);
                 } else {
-                    eprintln!("[{} TILE DEBUG] atlas_manager is None", debug_tag);
+                    #[cfg(debug_assertions)]
+                    debug!("[{} TILE DEBUG] atlas_manager is None", debug_tag);
                 }
             } else {
-                eprintln!("[{} TILE DEBUG] No tileset path for '{}'", debug_tag, tile);
+                #[cfg(debug_assertions)]
+                debug!("[{} TILE DEBUG] No tileset path for '{}'", debug_tag, tile);
             }
         } else {
-            eprintln!("[{} TILE DEBUG] TILESET_ID_PATH_MAP is None", debug_tag);
+            #[cfg(debug_assertions)]
+            debug!("[{} TILE DEBUG] TILESET_ID_PATH_MAP is None", debug_tag);
         }
     }
     if !visible || tile == '0' || tile == ' ' {
@@ -248,7 +256,8 @@ fn render_any_tile(
         }
     }
     if !drew_texture {
-        eprintln!("[{} TILE DEBUG] drew fallback color for '{}'", debug_tag, tile);
+        #[cfg(debug_assertions)]
+        debug!("[{} TILE DEBUG] drew fallback color for '{}'", debug_tag, tile);
         // Fallback: draw colored rect
         let color = get_tile_color(tile).unwrap_or(infill_color);
         painter.rect_filled(rect, 0.0, color);

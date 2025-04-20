@@ -2,6 +2,7 @@
 
 use eframe::egui;
 use serde_json::Value;
+use log::{debug, info, warn, error};
 
 use crate::config::keybindings::KeyBindings;
 use crate::ui::render::render_app;
@@ -109,11 +110,11 @@ impl CelesteMapEditor {
             let result = atlas_manager.load_atlas("Gameplay", celeste_dir, ctx);
             match result {
                 Ok(_) => {
-                    println!("Successfully initialized atlas manager");
+                    info!("Successfully initialized atlas manager");
                     editor.atlas_manager = Some(atlas_manager);
                 }
                 Err(e) => {
-                    println!("Failed to initialize atlas manager, falling back to PNG loading: {}", e);
+                    warn!("Failed to initialize atlas manager, falling back to PNG loading: {}", e);
                     editor.atlas_manager = None;
                 }
             }
@@ -150,119 +151,119 @@ impl CelesteMapEditor {
     }
 
     pub fn debug_map_structure(&self) {
-        println!("\n--- MAP STRUCTURE DEBUG ---");
+        debug!("--- MAP STRUCTURE DEBUG ---");
 
         if let Some(map) = &self.map_data {
-            println!("Map root name: {}", map["__name"].as_str().unwrap_or("unknown"));
-            println!("Map package: {}", map["package"].as_str().unwrap_or("unknown"));
+            debug!("Map root name: {}", map["__name"].as_str().unwrap_or("unknown"));
+            debug!("Map package: {}", map["package"].as_str().unwrap_or("unknown"));
 
             if let Some(map_children) = map["__children"].as_array() {
-                println!("Map has {} top-level children", map_children.len());
+                debug!("Map has {} top-level children", map_children.len());
 
                 // Find the levels element.
                 for (i, child) in map_children.iter().enumerate() {
                     let child_name = child["__name"].as_str().unwrap_or("unnamed");
-                    println!("Child {}: {}", i, child_name);
+                    debug!("Child {}: {}", i, child_name);
 
                     if child_name == "levels" {
                         if let Some(levels) = child["__children"].as_array() {
-                            println!("Found {} levels", levels.len());
+                            debug!("Found {} levels", levels.len());
                             let max_levels_to_print = 3.min(levels.len());
                             for i in 0..max_levels_to_print {
                                 let level = &levels[i];
                                 if level["__name"] == "level" {
-                                    println!("  Level {}: name={}", i, level["name"].as_str().unwrap_or("unnamed"));
-                                    println!("    x={}, y={}, width={}, height={}",
-                                             level["x"].as_f64().unwrap_or(0.0),
-                                             level["y"].as_f64().unwrap_or(0.0),
-                                             level["width"].as_f64().unwrap_or(0.0),
-                                             level["height"].as_f64().unwrap_or(0.0));
+                                    debug!("  Level {}: name={}", i, level["name"].as_str().unwrap_or("unnamed"));
+                                    debug!("    x={}, y={}, width={}, height={}",
+                                        level["x"].as_i64().unwrap_or(-1),
+                                        level["y"].as_i64().unwrap_or(-1),
+                                        level["width"].as_i64().unwrap_or(-1),
+                                        level["height"].as_i64().unwrap_or(-1));
 
                                     if let Some(level_children) = level["__children"].as_array() {
-                                        println!("    Has {} children elements", level_children.len());
+                                        debug!("    Has {} children elements", level_children.len());
                                         for (j, level_child) in level_children.iter().enumerate() {
                                             let element_name = level_child["__name"].as_str().unwrap_or("unnamed");
-                                            println!("      Child {}: {}", j, element_name);
+                                            debug!("      Child {}: {}", j, element_name);
                                             if element_name == "solids" {
                                                 if let Some(solids_text) = level_child["innerText"].as_str() {
                                                     let line_count = solids_text.lines().count();
                                                     let first_line = solids_text.lines().next().unwrap_or("");
-                                                    println!("        Found solids with {} lines", line_count);
-                                                    println!("        First line: {}", first_line);
-                                                    println!("        Line length: {}", first_line.len());
-                                                    println!("        offsetX: {}, offsetY: {}",
-                                                             level_child["offsetX"].as_i64().unwrap_or(0),
-                                                             level_child["offsetY"].as_i64().unwrap_or(0));
+                                                    debug!("        Found solids with {} lines", line_count);
+                                                    debug!("        First line: {}", first_line);
+                                                    debug!("        Line length: {}", first_line.len());
+                                                    let offset_x = level_child["offsetX"].as_i64().unwrap_or(-1);
+                                                    let offset_y = level_child["offsetY"].as_i64().unwrap_or(-1);
+                                                    debug!("        offsetX: {}, offsetY: {}", offset_x, offset_y);
                                                 } else {
-                                                    println!("        solids element has no innerText!");
+                                                    debug!("        solids element has no innerText!");
                                                 }
                                             }
                                         }
                                     } else {
-                                        println!("    Level has no children array!");
+                                        debug!("    Level has no children array!");
                                     }
                                 }
                             }
                         } else {
-                            println!("'levels' element has no children array!");
+                            debug!("'levels' element has no children array!");
                         }
                     }
                 }
             } else {
-                println!("Map has no children array!");
+                debug!("Map has no children array!");
             }
         } else {
-            println!("No map data available!");
+            debug!("No map data available!");
         }
 
-        println!("--- END MAP STRUCTURE DEBUG ---\n");
+        debug!("--- END MAP STRUCTURE DEBUG ---");
     }
 
     pub fn extract_level_names(&mut self) {
         self.level_names.clear();
         if let Some(map) = &self.map_data {
-            println!("Map structure: {}", map["__name"].as_str().unwrap_or("unknown"));
+            info!("Map structure: {}", map["__name"].as_str().unwrap_or("unknown"));
 
             let mut found_levels = false;
             if let Some(children) = map["__children"].as_array() {
-                println!("Map has {} top-level children", children.len());
+                info!("Map has {} top-level children", children.len());
                 for child in children {
                     if let Some(name) = child["__name"].as_str() {
-                        println!("Child: {}", name);
+                        info!("Child: {}", name);
                         if name == "levels" {
                             found_levels = true;
                             if let Some(levels) = child["__children"].as_array() {
-                                println!("Found 'levels' with {} sub-elements", levels.len());
+                                info!("Found 'levels' with {} sub-elements", levels.len());
                                 for level in levels {
                                     if level["__name"] == "level" {
                                         if let Some(level_name) = level["name"].as_str() {
-                                            println!("Adding level: {}", level_name);
+                                            info!("Adding level: {}", level_name);
                                             self.level_names.push(level_name.to_string());
                                         } else {
-                                            println!("Level has no name attribute!");
+                                            warn!("Level has no name attribute!");
                                         }
                                     } else {
-                                        println!("Non-level element in levels: {}", level["__name"].as_str().unwrap_or("unknown"));
+                                        warn!("Non-level element in levels: {}", level["__name"].as_str().unwrap_or("unknown"));
                                     }
                                 }
                             } else {
-                                println!("'levels' element has no children array!");
+                                warn!("'levels' element has no children array!");
                             }
                         }
                     }
                 }
 
                 if !found_levels {
-                    println!("WARNING: No 'levels' element found in map!");
+                    warn!("WARNING: No 'levels' element found in map!");
                 }
             } else {
-                println!("Map has no children array!");
+                warn!("Map has no children array!");
             }
         } else {
-            println!("No map data available!");
+            warn!("No map data available!");
         }
 
-        println!("Extracted {} level names", self.level_names.len());
+        info!("Extracted {} level names", self.level_names.len());
     }
 
     pub fn get_current_level(&self) -> Option<&Value> {
@@ -306,7 +307,7 @@ impl CelesteMapEditor {
                                     return;
                                 }
                             }
-                            println!("No 'solids' element found to update!");
+                            warn!("No 'solids' element found to update!");
                         }
                     }
                 }

@@ -1,6 +1,7 @@
 use eframe::egui;
 use std::fmt;
 use serde::{Serialize, Deserialize};
+use log::debug;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum InputBinding {
@@ -164,7 +165,8 @@ impl KeyBindings {
             let config_dir = dirs::config_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
             let config_path = config_dir.join("summit_editor_keys.json");
             if let Err(e) = std::fs::write(&config_path, bindings_json) {
-                eprintln!("Failed to save key bindings: {}", e);
+                #[cfg(debug_assertions)]
+                debug!("Failed to save key bindings: {}", e);
             }
         }
     }

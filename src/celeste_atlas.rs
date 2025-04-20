@@ -9,6 +9,7 @@ use byteorder::{LittleEndian, ReadBytesExt};
 use eframe::egui;
 use image::RgbaImage;
 use lazy_static::lazy_static;
+use log::{debug, info, warn, error};
 
 /// Metadata for a sprite in a Celeste atlas
 #[derive(Debug, Clone)]
@@ -80,7 +81,7 @@ impl AtlasManager {
 
     /// Load a Celeste atlas from a .meta file
     pub fn load_atlas(&mut self, name: &str, celeste_dir: &Path, ctx: &egui::Context) -> io::Result<()> {
-        println!("[DEBUG] Loading atlas '{}'", name);
+        debug!("Loading atlas '{}'", name);
         // On MacOS, Celeste's assets are inside Celeste.app/Contents/Resources/Content/Graphics/Atlases
         // If the provided celeste_dir contains 'Celeste.app', use as-is. Otherwise, append 'Celeste.app'.
         let mut atlas_base = celeste_dir.to_path_buf();
@@ -110,9 +111,9 @@ impl AtlasManager {
         let mut atlas = Atlas::new(name);
         self.load_meta_file(&meta_path, &mut atlas, &atlas_path, ctx)?;
 
-        println!("[DEBUG] Loaded {} sprites in atlas '{}'", atlas.sprites.len(), name);
-        println!("[DEBUG] Loaded {} textures in atlas '{}'", atlas.textures.len(), name);
-        println!("[DEBUG] Loaded {} images in atlas '{}'", atlas.images.len(), name);
+        debug!("Loaded {} sprites in atlas '{}'", atlas.sprites.len(), name);
+        debug!("Loaded {} textures in atlas '{}'", atlas.textures.len(), name);
+        debug!("Loaded {} images in atlas '{}'", atlas.images.len(), name);
 
         // Update texture ID to atlas mapping
         for texture in atlas.textures.values() {
@@ -230,14 +231,14 @@ impl AtlasManager {
     /// Load a Celeste .data file which contains a run-length encoded image
     pub fn load_data_file(&self, data_path: &Path) -> io::Result<RgbaImage> {
         use std::io::Read;
-        println!("[AtlasManager::load_data_file] Attempting to open .data file: {}", data_path.display());
+        debug!("Attempting to open .data file: {}", data_path.display());
         let mut file = File::open(data_path)?;
 
         // Read header: width (i32), height (i32), has_alpha (u8)
         let width = file.read_i32::<LittleEndian>()? as u32;
         let height = file.read_i32::<LittleEndian>()? as u32;
         let has_alpha = file.read_u8()? != 0;
-        println!("[AtlasManager::load_data_file] width: {width}, height: {height}, has_alpha: {has_alpha}");
+        debug!("width: {width}, height: {height}, has_alpha: {has_alpha}");
 
         let mut pixels = Vec::with_capacity((width * height * 4) as usize);
         let mut total_pixels = 0u32;
@@ -281,7 +282,7 @@ impl AtlasManager {
             total_pixels += 1;
         }
 
-        println!("[AtlasManager::load_data_file] Finished decoding. Total pixels: {}", pixels.len() / 4);
+        debug!("Finished decoding. Total pixels: {}", pixels.len() / 4);
         let image = RgbaImage::from_vec(width, height, pixels)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "failed to create image from buffer"))?;
         Ok(image)
@@ -304,20 +305,20 @@ impl AtlasManager {
     pub fn get_sprite(&self, atlas_name: &str, sprite_path: &str) -> Option<&Sprite> {
         if let Some(atlas) = self.atlases.get(atlas_name) {
             if !atlas.sprites.contains_key(sprite_path) {
-                println!("[ATLAS DEBUG] Sprite not found: '{}'. Available keys (first 10): {:?}", sprite_path, atlas.sprites.keys().take(10).collect::<Vec<_>>());
+                debug!("Sprite not found: '{}'. Available keys (first 10): {:?}", sprite_path, atlas.sprites.keys().take(10).collect::<Vec<_>>());
             } else {
-                println!("[ATLAS DEBUG] Sprite found: '{}'", sprite_path);
+                debug!("Sprite found: '{}'", sprite_path);
             }
             atlas.get_sprite(sprite_path)
         } else {
-            println!("[ATLAS DEBUG] Atlas '{}' not found!", atlas_name);
+            debug!("Atlas '{}' not found!", atlas_name);
             None
         }
     }
 
     /// Get the raw image data from an atlas
     pub fn get_atlas_image(&self, atlas_name: &str, data_file: &str) -> Option<&RgbaImage> {
-        println!("[DEBUG] get_atlas_image('{}', '{}')", atlas_name, data_file);
+        debug!("get_atlas_image('{}', '{}')", atlas_name, data_file);
         self.atlases.get(atlas_name)?.images.get(data_file)
     }
 

@@ -5,6 +5,7 @@ use once_cell::sync::OnceCell;
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use crate::app::CelesteMapEditor;
+use log::debug;
 
 /// Loads a mapping from tile id (char) to tileset path from a ForegroundTiles.xml or BackgroundTiles.xml file.
 pub fn load_tileset_id_path_map(xml_path: &str) -> HashMap<char, String> {
@@ -29,7 +30,8 @@ pub fn load_tileset_id_path_map(xml_path: &str) -> HashMap<char, String> {
                             if let Ok(val) = attr.unescape_value() {
                                 let ch = val.chars().next();
                                 id = ch;
-                                eprintln!("[TILE XML DEBUG] Found Tileset id attribute: '{}' (full: '{}')", ch.unwrap_or('?'), val);
+                                #[cfg(debug_assertions)]
+                                debug!("[TILE XML DEBUG] Found Tileset id attribute: '{}' (full: '{}')", ch.unwrap_or('?'), val);
                             }
                         }
                         b"path" => {
@@ -102,19 +104,24 @@ pub fn ensure_tileset_id_path_map_loaded_from_celeste(editor: &CelesteMapEditor)
             {
                 xml_path = xml_path.join("Content/Graphics/ForegroundTiles.xml");
             }
-            eprintln!("[TILE XML] Loading ForegroundTiles.xml from: {}", xml_path.display());
+            #[cfg(debug_assertions)]
+            debug!("[TILE XML] Loading ForegroundTiles.xml from: {}", xml_path.display());
             if xml_path.exists() {
                 let map = load_tileset_id_path_map(xml_path.to_str().unwrap());
-                eprintln!("[TILE XML] Loaded {} foreground entries:", map.len());
+                #[cfg(debug_assertions)]
+                debug!("[TILE XML] Loaded {} foreground entries:", map.len());
                 for (id, path) in &map {
-                    eprintln!("[TILE XML] id='{}' path='{}'", id, path);
+                    #[cfg(debug_assertions)]
+                    debug!("[TILE XML] id='{}' path='{}'", id, path);
                 }
                 let _ = TILESET_ID_PATH_MAP_FG.set(map);
             } else {
-                eprintln!("[TILE XML] ForegroundTiles.xml not found at {}", xml_path.display());
+                #[cfg(debug_assertions)]
+                debug!("[TILE XML] ForegroundTiles.xml not found at {}", xml_path.display());
             }
         } else {
-            eprintln!("[TILE XML] celeste_dir is None!");
+            #[cfg(debug_assertions)]
+            debug!("[TILE XML] celeste_dir is None!");
         }
     }
 
@@ -133,19 +140,24 @@ pub fn ensure_tileset_id_path_map_loaded_from_celeste(editor: &CelesteMapEditor)
             {
                 xml_path = xml_path.join("Content/Graphics/BackgroundTiles.xml");
             }
-            eprintln!("[TILE XML] Loading BackgroundTiles.xml from: {}", xml_path.display());
+            #[cfg(debug_assertions)]
+            debug!("[TILE XML] Loading BackgroundTiles.xml from: {}", xml_path.display());
             if xml_path.exists() {
                 let map = load_tileset_id_path_map(xml_path.to_str().unwrap());
-                eprintln!("[TILE XML] Loaded {} background entries:", map.len());
+                #[cfg(debug_assertions)]
+                debug!("[TILE XML] Loaded {} background entries:", map.len());
                 for (id, path) in &map {
-                    eprintln!("[TILE XML] id='{}' path='{}'", id, path);
+                    #[cfg(debug_assertions)]
+                    debug!("[TILE XML] id='{}' path='{}'", id, path);
                 }
                 let _ = TILESET_ID_PATH_MAP_BG.set(map);
             } else {
-                eprintln!("[TILE XML] BackgroundTiles.xml not found at {}", xml_path.display());
+                #[cfg(debug_assertions)]
+                debug!("[TILE XML] BackgroundTiles.xml not found at {}", xml_path.display());
             }
         } else {
-            eprintln!("[TILE XML] celeste_dir is None!");
+            #[cfg(debug_assertions)]
+            debug!("[TILE XML] celeste_dir is None!");
         }
     }
 }
