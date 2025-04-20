@@ -333,6 +333,55 @@ fn render_bg_tile(
     );
 }
 
+/// Render decals (bg or fg) using a filter function
+fn render_decals(
+    editor: &mut CelesteMapEditor,
+    painter: &egui::Painter,
+    level: &serde_json::Value,
+    _scale: f32,
+    _ctx: &egui::Context,
+    room_x: f32,
+    room_y: f32,
+    filter_fn: &dyn Fn(&serde_json::Value) -> bool,
+) {
+    if let Some(children) = level["__children"].as_array() {
+        for c in children.iter().filter(|c| filter_fn(c)) {
+            if let Some(decs) = c["__children"].as_array() {
+                for d in decs.iter().filter(|d| d["__name"] == "decal") {
+                    let path = normalize_decal_path(d["texture"].as_str().unwrap_or(""));
+                    let x    = d["x"].as_f64().unwrap_or(0.0)    as f32;
+                    let y    = d["y"].as_f64().unwrap_or(0.0)    as f32;
+                    let sx   = d["scaleX"].as_f64().unwrap_or(1.0) as f32;
+                    let sy   = d["scaleY"].as_f64().unwrap_or(1.0) as f32;
+
+                    if let Some(spr) = editor
+                        .atlas_manager
+                        .as_ref()
+                        .and_then(|am| am.get_sprite("Gameplay", &path))
+                    {
+                        let _global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
+                        let center_x = (room_x + x) * _global_scale - editor.camera_pos.x;
+                        let center_y = (room_y + y) * _global_scale - editor.camera_pos.y;
+
+                        let width_px  = spr.metadata.width  as f32 * sx * _global_scale * DECAL_SCALE;
+                        let height_px = spr.metadata.height as f32 * sy * _global_scale * DECAL_SCALE;
+
+                        let pos  = Pos2::new(center_x - width_px  * 0.5, center_y - height_px * 0.5);
+                        let size = Vec2::new(width_px, height_px);
+
+                        editor.atlas_manager.as_ref().unwrap().draw_sprite(
+                            spr,
+                            painter,
+                            Rect::from_min_size(pos, size),
+                            Color32::WHITE,
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Calcule le début de la grille (pour x ou y)
 fn compute_grid_start(cam_coord: f32, tile_size: f32) -> f32 {
     cam_coord % tile_size
@@ -448,102 +497,6 @@ fn batch_render_bg_tiles(
     }
 }
 
-/// Render bgdecals
-fn render_bgdecals(
-    editor: &mut CelesteMapEditor,
-    painter: &egui::Painter,
-    level: &serde_json::Value,
-    _scale: f32,
-    _ctx: &egui::Context,
-    room_x: f32, // = ld.x
-    room_y: f32, // = ld.y
-) {
-    if let Some(children) = level["__children"].as_array() {
-        for c in children.iter().filter(|c| c["__name"] == "bgdecals") {
-            if let Some(decs) = c["__children"].as_array() {
-                for d in decs.iter().filter(|d| d["__name"] == "decal") {
-                    let path = normalize_decal_path(d["texture"].as_str().unwrap_or(""));
-                    let x    = d["x"].as_f64().unwrap_or(0.0)    as f32;
-                    let y    = d["y"].as_f64().unwrap_or(0.0)    as f32;
-                    let sx   = d["scaleX"].as_f64().unwrap_or(1.0) as f32;
-                    let sy   = d["scaleY"].as_f64().unwrap_or(1.0) as f32;
-
-                    if let Some(spr) = editor
-                        .atlas_manager
-                        .as_ref()
-                        .and_then(|am| am.get_sprite("Gameplay", &path))
-                    {
-                        let _global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
-                        let center_x = (room_x + x) * _global_scale - editor.camera_pos.x;
-                        let center_y = (room_y + y) * _global_scale - editor.camera_pos.y;
-
-                        let width_px  = spr.metadata.width  as f32 * sx * _global_scale * DECAL_SCALE;
-                        let height_px = spr.metadata.height as f32 * sy * _global_scale * DECAL_SCALE;
-
-                        let pos  = Pos2::new(center_x - width_px  * 0.5, center_y - height_px * 0.5);
-                        let size = Vec2::new(width_px, height_px);
-
-                        editor.atlas_manager.as_ref().unwrap().draw_sprite(
-                            spr,
-                            painter,
-                            Rect::from_min_size(pos, size),
-                            Color32::WHITE,
-                        );
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Render fgdecals
-fn render_fgdecals(
-    editor: &mut CelesteMapEditor,
-    painter: &egui::Painter,
-    level: &serde_json::Value,
-    _scale: f32,
-    _ctx: &egui::Context,
-    room_x: f32, // = ld.x
-    room_y: f32, // = ld.y
-) {
-    if let Some(children) = level["__children"].as_array() {
-        for c in children.iter().filter(|c| c["__name"] == "fgdecals") {
-            if let Some(decs) = c["__children"].as_array() {
-                for d in decs.iter().filter(|d| d["__name"] == "decal") {
-                    let path = normalize_decal_path(d["texture"].as_str().unwrap_or(""));
-                    let x    = d["x"].as_f64().unwrap_or(0.0)    as f32;
-                    let y    = d["y"].as_f64().unwrap_or(0.0)    as f32;
-                    let sx   = d["scaleX"].as_f64().unwrap_or(1.0) as f32;
-                    let sy   = d["scaleY"].as_f64().unwrap_or(1.0) as f32;
-
-                    if let Some(spr) = editor
-                        .atlas_manager
-                        .as_ref()
-                        .and_then(|am| am.get_sprite("Gameplay", &path))
-                    {
-                        let _global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
-                        let center_x = (room_x + x) * _global_scale - editor.camera_pos.x;
-                        let center_y = (room_y + y) * _global_scale - editor.camera_pos.y;
-
-                        let width_px  = spr.metadata.width  as f32 * sx * _global_scale * DECAL_SCALE;
-                        let height_px = spr.metadata.height as f32 * sy * _global_scale * DECAL_SCALE;
-
-                        let pos  = Pos2::new(center_x - width_px  * 0.5, center_y - height_px * 0.5);
-                        let size = Vec2::new(width_px, height_px);
-
-                        editor.atlas_manager.as_ref().unwrap().draw_sprite(
-                            spr,
-                            painter,
-                            Rect::from_min_size(pos, size),
-                            Color32::WHITE,
-                        );
-                    }
-                }
-            }
-        }
-    }
-}
-
 /// Render room content
 fn render_room_content(
     editor: &mut CelesteMapEditor,
@@ -562,7 +515,16 @@ fn render_room_content(
     batch_render_bg_tiles(editor, painter, ld, _tile_size, expanded_view, _ctx);
     // 3) Background decals
     let _global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
-    render_bgdecals(editor, painter, json, _global_scale, _ctx, ld.x, ld.y);
+    render_decals(
+        editor,
+        painter,
+        json,
+        _global_scale,
+        _ctx,
+        ld.x,
+        ld.y,
+        &|c| c["__name"] == "bgdecals",
+    );
     // 4) Foreground tiles
     if editor.show_tiles {
         batch_render_tiles(editor, painter, ld, _tile_size, expanded_view, _ctx);
@@ -570,7 +532,16 @@ fn render_room_content(
     // 5) Foreground decals
     if editor.show_fgdecals {
         let _global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
-        render_fgdecals(editor, painter, json, _global_scale, _ctx, ld.x, ld.y);
+        render_decals(
+            editor,
+            painter,
+            json,
+            _global_scale,
+            _ctx,
+            ld.x,
+            ld.y,
+            &|c| c["__name"] == "fgdecals",
+        );
     }
     // 6) The rest (labels, outlines, etc) are handled after this function
 }
