@@ -35,6 +35,10 @@ pub struct LevelRenderData {
     pub offset_y: i32,
     pub autotile_coords: Vec<Vec<Option<(u32, u32)>>>, // cache for autotiling (foreground)
     pub bg_autotile_coords: Vec<Vec<Option<(u32, u32)>>>, // cache for autotiling (background)
+    pub fg_xml_path: String,
+    pub bg_xml_path: String,
+    pub fg_tilesets: std::collections::HashMap<char, crate::tile_xml::Tileset>,
+    pub bg_tilesets: std::collections::HashMap<char, crate::tile_xml::Tileset>,
 }
 
 impl LevelRenderData {
@@ -99,6 +103,10 @@ pub(crate) fn extract_level_data(level: &serde_json::Value, editor: &CelesteMapE
         }
     }
     let name = level["name"].as_str().unwrap_or("").to_string();
+    let fg_xml_path = get_celeste_fgtiles_xml_path_from_editor(editor);
+    let fg_tilesets = crate::tile_xml::get_tilesets_with_rules(&fg_xml_path).clone();
+    let bg_xml_path = get_celeste_bgtiles_xml_path_from_editor(editor);
+    let bg_tilesets = crate::tile_xml::get_tilesets_with_rules(&bg_xml_path).clone();
     let mut ld = LevelRenderData {
         name,
         x,
@@ -111,11 +119,13 @@ pub(crate) fn extract_level_data(level: &serde_json::Value, editor: &CelesteMapE
         offset_y,
         autotile_coords: Vec::new(),
         bg_autotile_coords: Vec::new(),
+        fg_xml_path: fg_xml_path.clone(),
+        bg_xml_path: bg_xml_path.clone(),
+        fg_tilesets,
+        bg_tilesets,
     };
     // Compute autotile coordinates on load
-    let fg_xml_path = get_celeste_fgtiles_xml_path_from_editor(editor);
     ld.compute_autotile_coords(&fg_xml_path);
-    let bg_xml_path = get_celeste_bgtiles_xml_path_from_editor(editor);
     ld.compute_bg_autotile_coords(&bg_xml_path);
     Some(ld)
 }
@@ -289,7 +299,7 @@ fn render_tile(
         &|c| !is_solid_tile(c),
         SOLID_TILE_COLOR,
         crate::tile_xml::TILESET_ID_PATH_MAP_FG.get(),
-        &get_celeste_fgtiles_xml_path_from_editor(editor),
+        &ld.fg_xml_path,
         "FG",
     );
 }
@@ -320,7 +330,7 @@ fn render_bg_tile(
         &|c| c == '0',
         INFILL_COLOR,
         crate::tile_xml::TILESET_ID_PATH_MAP_BG.get(),
-        &get_celeste_bgtiles_xml_path_from_editor(editor),
+        &ld.bg_xml_path,
         "BG",
     );
 }
