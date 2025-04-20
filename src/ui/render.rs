@@ -7,6 +7,7 @@ use crate::map::loader::{save_map, save_map_as};
 use crate::tile_xml::{load_tileset_id_path_map, get_tileset_path_for_id, ensure_tileset_id_path_map_loaded_from_celeste, get_first_tile_coords_for_id_or_default, get_tilesets_with_rules};
 use crate::celeste_atlas::AtlasManager;
 use log::debug;
+use crate::ui::tile_neighbors::TileNeighbors;
 
 // Constants
 pub const TILE_SIZE: f32 = 20.0;
@@ -40,6 +41,7 @@ pub struct LevelRenderData {
     pub bg_xml_path: String,
     pub fg_tilesets: std::collections::HashMap<char, crate::tile_xml::Tileset>,
     pub bg_tilesets: std::collections::HashMap<char, crate::tile_xml::Tileset>,
+    pub neighbor_masks: Vec<Vec<TileNeighbors>>,
 }
 
 impl LevelRenderData {
@@ -124,10 +126,17 @@ pub(crate) fn extract_level_data(level: &serde_json::Value, editor: &CelesteMapE
         bg_xml_path: bg_xml_path.clone(),
         fg_tilesets,
         bg_tilesets,
+        neighbor_masks: Vec::new(),
     };
     // Compute autotile coordinates on load
     ld.compute_autotile_coords(&fg_xml_path);
     ld.compute_bg_autotile_coords(&bg_xml_path);
+    // Compute neighbor masks for internal detection
+    ld.neighbor_masks = ld.solids.iter().enumerate().map(|(y, row)| {
+        row.iter().enumerate().map(|(x, &tile)| {
+            TileNeighbors::from_grid(&ld.solids, x, y, |c| is_solid_tile(c))
+        }).collect()
+    }).collect();
     Some(ld)
 }
 
@@ -197,24 +206,11 @@ fn render_any_tile(
     let rect = Rect::from_min_size(pos, Vec2::splat(tile_size));
 
     // Infill check
-    let mut internal = true;
-    let max_y = tiles.len();
-    for dy in -1..=1 {
-        for dx in -1..=1 {
-            if dx == 0 && dy == 0 { continue; }
-            let ny = y as isize + dy;
-            let nx = x as isize + dx;
-            if ny < 0 || nx < 0 || ny as usize >= max_y {
-                continue;
-            }
-            let row = &tiles[ny as usize];
-            if nx as usize >= row.len() || is_air_or_empty(row[nx as usize]) {
-                internal = false;
-                break;
-            }
-        }
-        if !internal { break; }
-    }
+    let internal = if let Some(neighs_row) = ld.neighbor_masks.get(y) {
+        if let Some(mask) = neighs_row.get(x) {
+            mask.is_internal()
+        } else { false }
+    } else { false };
     let mut drew_texture = false;
     if !autotile_coords.is_empty() {
         if let Some(coord) = autotile_coords.get(y).and_then(|row| row.get(x)).and_then(|v| *v) {
@@ -268,7 +264,7 @@ fn render_any_tile(
             painter.rect_filled(Rect::from_min_size(Pos2::new(pos.x, pos.y - 1.0), Vec2::new(tile_size, 1.0)), 0.0, EXTERNAL_BORDER_COLOR);
         }
         // Down
-        if !(y + 1 < max_y && x < tiles[y+1].len() && !is_air_or_empty(tiles[y+1][x])) {
+        if !(y + 1 < tiles.len() && x < tiles[y+1].len() && !is_air_or_empty(tiles[y+1][x])) {
             painter.rect_filled(Rect::from_min_size(Pos2::new(pos.x, pos.y + tile_size), Vec2::new(tile_size, 1.0)), 0.0, EXTERNAL_BORDER_COLOR);
         }
         // Left
