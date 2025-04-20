@@ -1,11 +1,8 @@
-#![allow(dead_code, unused_imports, unused_variables)]
-
 use eframe::egui;
 use egui::{Color32, Pos2, Rect, Stroke, Vec2};
 use crate::app::CelesteMapEditor;
 use crate::map::loader::{save_map, save_map_as};
-use crate::tile_xml::{load_tileset_id_path_map, get_tileset_path_for_id, ensure_tileset_id_path_map_loaded_from_celeste, get_first_tile_coords_for_id_or_default, get_tilesets_with_rules};
-use crate::celeste_atlas::AtlasManager;
+use crate::tile_xml::{get_tileset_path_for_id, ensure_tileset_id_path_map_loaded_from_celeste};
 use log::debug;
 use crate::ui::tile_neighbors::TileNeighbors;
 
@@ -39,8 +36,6 @@ pub struct LevelRenderData {
     pub bg_autotile_coords: Vec<Vec<Option<(u32, u32)>>>, // cache for autotiling (background)
     pub fg_xml_path: String,
     pub bg_xml_path: String,
-    pub fg_tilesets: std::collections::HashMap<char, crate::tile_xml::Tileset>,
-    pub bg_tilesets: std::collections::HashMap<char, crate::tile_xml::Tileset>,
     pub neighbor_masks: Vec<Vec<TileNeighbors>>,
 }
 
@@ -67,7 +62,7 @@ impl LevelRenderData {
 }
 
 /// Returns the color for a tile character, or None if a texture should be used.
-fn get_tile_color(tile_char: char) -> Option<Color32> {
+fn get_tile_color(_tile_char: char) -> Option<Color32> {
     None
 }
 
@@ -107,9 +102,7 @@ pub(crate) fn extract_level_data(level: &serde_json::Value, editor: &CelesteMapE
     }
     let name = level["name"].as_str().unwrap_or("").to_string();
     let fg_xml_path = get_celeste_fgtiles_xml_path_from_editor(editor);
-    let fg_tilesets = crate::tile_xml::get_tilesets_with_rules(&fg_xml_path).clone();
     let bg_xml_path = get_celeste_bgtiles_xml_path_from_editor(editor);
-    let bg_tilesets = crate::tile_xml::get_tilesets_with_rules(&bg_xml_path).clone();
     let mut ld = LevelRenderData {
         name,
         x,
@@ -124,8 +117,6 @@ pub(crate) fn extract_level_data(level: &serde_json::Value, editor: &CelesteMapE
         bg_autotile_coords: Vec::new(),
         fg_xml_path: fg_xml_path.clone(),
         bg_xml_path: bg_xml_path.clone(),
-        fg_tilesets,
-        bg_tilesets,
         neighbor_masks: Vec::new(),
     };
     // Compute autotile coordinates on load
@@ -133,7 +124,7 @@ pub(crate) fn extract_level_data(level: &serde_json::Value, editor: &CelesteMapE
     ld.compute_bg_autotile_coords(&bg_xml_path);
     // Compute neighbor masks for internal detection
     ld.neighbor_masks = ld.solids.iter().enumerate().map(|(y, row)| {
-        row.iter().enumerate().map(|(x, &tile)| {
+        row.iter().enumerate().map(|(x, &_tile)| {
             TileNeighbors::from_grid(&ld.solids, x, y, |c| is_solid_tile(c))
         }).collect()
     }).collect();
@@ -157,7 +148,7 @@ fn render_any_tile(
     autotile_coords: &[Vec<Option<(u32, u32)>>],
     x: usize,
     y: usize,
-    tile: char,
+    _tile: char,
     tile_size: f32,
     visible: bool,
     is_air_or_empty: &dyn Fn(char) -> bool,
@@ -169,11 +160,11 @@ fn render_any_tile(
     // TEMP DEBUG: print mapping status for first tile
     if x == 0 && y == 0 {
         #[cfg(debug_assertions)]
-        debug!("[{} TILE DEBUG] tile char: {}", debug_tag, tile);
+        debug!("[{} TILE DEBUG] tile char: {}", debug_tag, _tile);
         if let Some(map) = tileset_id_path_map {
-            if let Some(path) = get_tileset_path_for_id(map, tile) {
+            if let Some(path) = get_tileset_path_for_id(map, _tile) {
                 #[cfg(debug_assertions)]
-                debug!("[{} TILE DEBUG] tileset path for '{}': {}", debug_tag, tile, path);
+                debug!("[{} TILE DEBUG] tileset path for '{}': {}", debug_tag, _tile, path);
                 let sprite_path = format!("tilesets/{}", path);
                 #[cfg(debug_assertions)]
                 debug!("[{} TILE DEBUG] sprite_path: {}", debug_tag, sprite_path);
@@ -187,26 +178,26 @@ fn render_any_tile(
                 }
             } else {
                 #[cfg(debug_assertions)]
-                debug!("[{} TILE DEBUG] No tileset path for '{}'", debug_tag, tile);
+                debug!("[{} TILE DEBUG] No tileset path for '{}'", debug_tag, _tile);
             }
         } else {
             #[cfg(debug_assertions)]
             debug!("[{} TILE DEBUG] TILESET_ID_PATH_MAP is None", debug_tag);
         }
     }
-    if !visible || tile == '0' || tile == ' ' {
+    if !visible || _tile == '0' || _tile == ' ' {
         return;
     }
-    let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
-    let world_x0 = (ld.x + ld.offset_x as f32) * global_scale;
-    let world_y0 = (ld.y + ld.offset_y as f32) * global_scale;
+    let _global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
+    let world_x0 = (ld.x + ld.offset_x as f32) * _global_scale;
+    let world_y0 = (ld.y + ld.offset_y as f32) * _global_scale;
     let px = world_x0 + x as f32 * tile_size - editor.camera_pos.x;
     let py = world_y0 + y as f32 * tile_size - editor.camera_pos.y;
     let pos = Pos2::new(px, py);
     let rect = Rect::from_min_size(pos, Vec2::splat(tile_size));
 
     // Infill check
-    let internal = if let Some(neighs_row) = ld.neighbor_masks.get(y) {
+    let _internal = if let Some(neighs_row) = ld.neighbor_masks.get(y) {
         if let Some(mask) = neighs_row.get(x) {
             mask.is_internal()
         } else { false }
@@ -215,7 +206,7 @@ fn render_any_tile(
     if !autotile_coords.is_empty() {
         if let Some(coord) = autotile_coords.get(y).and_then(|row| row.get(x)).and_then(|v| *v) {
             if let Some(map) = tileset_id_path_map {
-                if let Some(path) = get_tileset_path_for_id(map, tile) {
+                if let Some(path) = get_tileset_path_for_id(map, _tile) {
                     let region = egui::Rect::from_min_size(
                         egui::Pos2::new((coord.0 * 8) as f32, (coord.1 * 8) as f32),
                         egui::Vec2::new(8.0, 8.0),
@@ -233,9 +224,9 @@ fn render_any_tile(
     } else {
         // fallback: recompute on the fly (shouldn't happen)
         if let Some(map) = tileset_id_path_map {
-            if let Some(path) = get_tileset_path_for_id(map, tile) {
+            if let Some(path) = get_tileset_path_for_id(map, _tile) {
                 let tilesets = crate::tile_xml::get_tilesets_with_rules(xml_path);
-                if let Some((tile_x, tile_y)) = crate::tile_xml::autotile_tile_coord(tile, tiles, x, y, tilesets, &|c| !is_air_or_empty(c)) {
+                if let Some((tile_x, tile_y)) = crate::tile_xml::autotile_tile_coord(_tile, tiles, x, y, tilesets, &|c| !is_air_or_empty(c)) {
                     let region = egui::Rect::from_min_size(
                         egui::Pos2::new((tile_x * 8) as f32, (tile_y * 8) as f32),
                         egui::Vec2::new(8.0, 8.0),
@@ -253,9 +244,9 @@ fn render_any_tile(
     }
     if !drew_texture {
         #[cfg(debug_assertions)]
-        debug!("[{} TILE DEBUG] drew fallback color for '{}'", debug_tag, tile);
+        debug!("[{} TILE DEBUG] drew fallback color for '{}'", debug_tag, _tile);
         // Fallback: draw colored rect
-        let color = get_tile_color(tile).unwrap_or(infill_color);
+        let color = get_tile_color(_tile).unwrap_or(infill_color);
         painter.rect_filled(rect, 0.0, color);
 
         // External borders
@@ -285,12 +276,12 @@ fn render_tile(
     editor: &CelesteMapEditor,
     x: usize,
     y: usize,
-    tile: char,
-    tile_size: f32,
+    _tile: char,
+    _tile_size: f32,
     visible: bool,
 ) {
     ensure_tileset_id_path_map_loaded_from_celeste(editor);
-    let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
+    let _global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
     render_any_tile(
         painter,
         ld,
@@ -299,8 +290,8 @@ fn render_tile(
         &ld.autotile_coords,
         x,
         y,
-        tile,
-        tile_size,
+        _tile,
+        _tile_size,
         visible,
         &|c| !is_solid_tile(c),
         SOLID_TILE_COLOR,
@@ -317,12 +308,12 @@ fn render_bg_tile(
     editor: &CelesteMapEditor,
     x: usize,
     y: usize,
-    tile: char,
-    tile_size: f32,
+    _tile: char,
+    _tile_size: f32,
     visible: bool,
 ) {
     ensure_tileset_id_path_map_loaded_from_celeste(editor);
-    let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
+    let _global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
     render_any_tile(
         painter,
         ld,
@@ -331,8 +322,8 @@ fn render_bg_tile(
         &ld.bg_autotile_coords,
         x,
         y,
-        tile,
-        tile_size,
+        _tile,
+        _tile_size,
         visible,
         &|c| c == '0',
         INFILL_COLOR,
@@ -385,26 +376,26 @@ fn batch_render_tiles(
     editor: &mut CelesteMapEditor,
     painter: &egui::Painter,
     ld: &LevelRenderData,
-    tile_size: f32,
+    _tile_size: f32,
     rect: Rect,
     _ctx: &egui::Context,
 ) {
     // convert room origin from Celeste pixels (8px units) into tile-space
-    let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
+    let _global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
     let origin_tiles_x = (ld.x + ld.offset_x as f32) / 8.0;
     let origin_tiles_y = (ld.y + ld.offset_y as f32) / 8.0;
 
     // compute the range of tile indices intersecting our expanded view
-    let start_x = ((rect.min.x + editor.camera_pos.x) / tile_size - origin_tiles_x)
+    let start_x = ((rect.min.x + editor.camera_pos.x) / _tile_size - origin_tiles_x)
         .floor()
         .max(0.0) as usize;
-    let start_y = ((rect.min.y + editor.camera_pos.y) / tile_size - origin_tiles_y)
+    let start_y = ((rect.min.y + editor.camera_pos.y) / _tile_size - origin_tiles_y)
         .floor()
         .max(0.0) as usize;
-    let end_x   = ((rect.max.x + editor.camera_pos.x) / tile_size - origin_tiles_x)
+    let end_x   = ((rect.max.x + editor.camera_pos.x) / _tile_size - origin_tiles_x)
         .ceil()
         .max(0.0) as usize;
-    let end_y   = ((rect.max.y + editor.camera_pos.y) / tile_size - origin_tiles_y)
+    let end_y   = ((rect.max.y + editor.camera_pos.y) / _tile_size - origin_tiles_y)
         .ceil()
         .max(0.0) as usize;
 
@@ -413,8 +404,8 @@ fn batch_render_tiles(
         if yy >= ld.solids.len() { continue; }
         for xx in start_x..=end_x {
             if xx >= ld.solids[yy].len() { continue; }
-            let tile = ld.solids[yy][xx];
-            render_tile(painter, ld, editor, xx, yy, tile, tile_size, true);
+            let _tile = ld.solids[yy][xx];
+            render_tile(painter, ld, editor, xx, yy, _tile, _tile_size, true);
         }
     }
 }
@@ -424,26 +415,26 @@ fn batch_render_bg_tiles(
     editor: &mut CelesteMapEditor,
     painter: &egui::Painter,
     ld: &LevelRenderData,
-    tile_size: f32,
+    _tile_size: f32,
     rect: Rect,
     _ctx: &egui::Context,
 ) {
     // convert room origin from Celeste pixels (8px units) into tile-space
-    let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
+    let _global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
     let origin_tiles_x = (ld.x + ld.offset_x as f32) / 8.0;
     let origin_tiles_y = (ld.y + ld.offset_y as f32) / 8.0;
 
     // compute the range of tile indices intersecting our expanded view
-    let start_x = ((rect.min.x + editor.camera_pos.x) / tile_size - origin_tiles_x)
+    let start_x = ((rect.min.x + editor.camera_pos.x) / _tile_size - origin_tiles_x)
         .floor()
         .max(0.0) as usize;
-    let start_y = ((rect.min.y + editor.camera_pos.y) / tile_size - origin_tiles_y)
+    let start_y = ((rect.min.y + editor.camera_pos.y) / _tile_size - origin_tiles_y)
         .floor()
         .max(0.0) as usize;
-    let end_x   = ((rect.max.x + editor.camera_pos.x) / tile_size - origin_tiles_x)
+    let end_x   = ((rect.max.x + editor.camera_pos.x) / _tile_size - origin_tiles_x)
         .ceil()
         .max(0.0) as usize;
-    let end_y   = ((rect.max.y + editor.camera_pos.y) / tile_size - origin_tiles_y)
+    let end_y   = ((rect.max.y + editor.camera_pos.y) / _tile_size - origin_tiles_y)
         .ceil()
         .max(0.0) as usize;
 
@@ -451,8 +442,8 @@ fn batch_render_bg_tiles(
         if yy >= ld.bg.len() { continue; }
         for xx in start_x..=end_x {
             if xx >= ld.bg[yy].len() { continue; }
-            let tile = ld.bg[yy][xx];
-            render_bg_tile(painter, ld, editor, xx, yy, tile, tile_size, true);
+            let _tile = ld.bg[yy][xx];
+            render_bg_tile(painter, ld, editor, xx, yy, _tile, _tile_size, true);
         }
     }
 }
@@ -462,7 +453,7 @@ fn render_bgdecals(
     editor: &mut CelesteMapEditor,
     painter: &egui::Painter,
     level: &serde_json::Value,
-    scale: f32,
+    _scale: f32,
     _ctx: &egui::Context,
     room_x: f32, // = ld.x
     room_y: f32, // = ld.y
@@ -482,19 +473,18 @@ fn render_bgdecals(
                         .as_ref()
                         .and_then(|am| am.get_sprite("Gameplay", &path))
                     {
-                        let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
-                        let center_x = (room_x + x) * global_scale - editor.camera_pos.x;
-                        let center_y = (room_y + y) * global_scale - editor.camera_pos.y;
+                        let _global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
+                        let center_x = (room_x + x) * _global_scale - editor.camera_pos.x;
+                        let center_y = (room_y + y) * _global_scale - editor.camera_pos.y;
 
-                        let width_px  = spr.metadata.width  as f32 * sx * global_scale * DECAL_SCALE;
-                        let height_px = spr.metadata.height as f32 * sy * global_scale * DECAL_SCALE;
+                        let width_px  = spr.metadata.width  as f32 * sx * _global_scale * DECAL_SCALE;
+                        let height_px = spr.metadata.height as f32 * sy * _global_scale * DECAL_SCALE;
 
                         let pos  = Pos2::new(center_x - width_px  * 0.5, center_y - height_px * 0.5);
                         let size = Vec2::new(width_px, height_px);
 
-                        crate::celeste_atlas::AtlasManager::draw_sprite(
-                            &editor.atlas_manager.as_ref().unwrap(),
-                            &spr,
+                        editor.atlas_manager.as_ref().unwrap().draw_sprite(
+                            spr,
                             painter,
                             Rect::from_min_size(pos, size),
                             Color32::WHITE,
@@ -511,7 +501,7 @@ fn render_fgdecals(
     editor: &mut CelesteMapEditor,
     painter: &egui::Painter,
     level: &serde_json::Value,
-    scale: f32,
+    _scale: f32,
     _ctx: &egui::Context,
     room_x: f32, // = ld.x
     room_y: f32, // = ld.y
@@ -531,19 +521,18 @@ fn render_fgdecals(
                         .as_ref()
                         .and_then(|am| am.get_sprite("Gameplay", &path))
                     {
-                        let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
-                        let center_x = (room_x + x) * global_scale - editor.camera_pos.x;
-                        let center_y = (room_y + y) * global_scale - editor.camera_pos.y;
+                        let _global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
+                        let center_x = (room_x + x) * _global_scale - editor.camera_pos.x;
+                        let center_y = (room_y + y) * _global_scale - editor.camera_pos.y;
 
-                        let width_px  = spr.metadata.width  as f32 * sx * global_scale * DECAL_SCALE;
-                        let height_px = spr.metadata.height as f32 * sy * global_scale * DECAL_SCALE;
+                        let width_px  = spr.metadata.width  as f32 * sx * _global_scale * DECAL_SCALE;
+                        let height_px = spr.metadata.height as f32 * sy * _global_scale * DECAL_SCALE;
 
                         let pos  = Pos2::new(center_x - width_px  * 0.5, center_y - height_px * 0.5);
                         let size = Vec2::new(width_px, height_px);
 
-                        crate::celeste_atlas::AtlasManager::draw_sprite(
-                            &editor.atlas_manager.as_ref().unwrap(),
-                            &spr,
+                        editor.atlas_manager.as_ref().unwrap().draw_sprite(
+                            spr,
                             painter,
                             Rect::from_min_size(pos, size),
                             Color32::WHITE,
@@ -561,27 +550,27 @@ fn render_room_content(
     painter: &egui::Painter,
     ld: &LevelRenderData,
     json: &serde_json::Value,
-    tile_size: f32,
+    _tile_size: f32,
     view: Rect,
-    ctx: &egui::Context,
+    _ctx: &egui::Context,
 ) {
     // 1) Topmost overlays (top, grid)
     // (Grid is drawn in render_central_panel, not here)
     // 2) Background tiles
     let margin = CULLING_THRESHOLD_BASE * (2.0 / editor.zoom_level.max(0.1));
     let expanded_view = view.expand(margin);
-    batch_render_bg_tiles(editor, painter, ld, tile_size, expanded_view, ctx);
+    batch_render_bg_tiles(editor, painter, ld, _tile_size, expanded_view, _ctx);
     // 3) Background decals
-    let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
-    render_bgdecals(editor, painter, json, global_scale, ctx, ld.x, ld.y);
+    let _global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
+    render_bgdecals(editor, painter, json, _global_scale, _ctx, ld.x, ld.y);
     // 4) Foreground tiles
     if editor.show_tiles {
-        batch_render_tiles(editor, painter, ld, tile_size, expanded_view, ctx);
+        batch_render_tiles(editor, painter, ld, _tile_size, expanded_view, _ctx);
     }
     // 5) Foreground decals
     if editor.show_fgdecals {
-        let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
-        render_fgdecals(editor, painter, json, global_scale, ctx, ld.x, ld.y);
+        let _global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
+        render_fgdecals(editor, painter, json, _global_scale, _ctx, ld.x, ld.y);
     }
     // 6) The rest (labels, outlines, etc) are handled after this function
 }
@@ -591,15 +580,15 @@ fn render_room_outline_and_label(
     editor: &CelesteMapEditor,
     painter: &egui::Painter,
     ld: &LevelRenderData,
-    tile_size: f32,
-    ctx: &egui::Context,
+    _tile_size: f32,
+    _ctx: &egui::Context,
     selected: bool,
 ) {
-    let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
-    let px=(ld.x)*global_scale-editor.camera_pos.x;
-    let py=(ld.y)*global_scale-editor.camera_pos.y;
-    let w=ld.width*global_scale;
-    let h=ld.height*global_scale;
+    let _global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
+    let px=(ld.x)*_global_scale-editor.camera_pos.x;
+    let py=(ld.y)*_global_scale-editor.camera_pos.y;
+    let w=ld.width*_global_scale;
+    let h=ld.height*_global_scale;
     let rect=Rect::from_min_size(Pos2::new(px,py),Vec2::new(w,h));
     let col=if selected {ROOM_CONTOUR_SELECTED} else {ROOM_CONTOUR_UNSELECTED};
     let th=if selected {3.0} else {2.0};
@@ -609,31 +598,13 @@ fn render_room_outline_and_label(
     }
 }
 
-/// Collect levels with data and JSON
-fn collect_levels_with_json(
-    node: &serde_json::Value,
-    out: &mut Vec<(usize, LevelRenderData, serde_json::Value)>,
-    mut idx: usize,
-    editor: &CelesteMapEditor,
-) -> usize {
-    if node["__name"].as_str()==Some("level") {
-        if let Some(ld)=extract_level_data(node, editor) {
-            out.push((idx,ld,node.clone())); idx+=1;
-        }
-    }
-    if let Some(children)=node["__children"].as_array() {
-        for c in children { idx=collect_levels_with_json(c,out,idx,editor); }
-    }
-    idx
-}
-
 /// Render all rooms
 fn render_all_rooms(
     editor: &mut CelesteMapEditor,
     painter: &egui::Painter,
-    tile_size: f32,
+    _tile_size: f32,
     response: &egui::Response,
-    ctx: &egui::Context,
+    _ctx: &egui::Context,
 ) {
     let view = response.rect;
     let cached_rooms_len = editor.cached_rooms.len();
@@ -644,11 +615,11 @@ fn render_all_rooms(
             (room.level_data.clone(), room.json.clone())
         };
         // Compute room rectangle in world coordinates
-        let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
-        let room_x = (ld.x) * global_scale - editor.camera_pos.x;
-        let room_y = (ld.y) * global_scale - editor.camera_pos.y;
-        let room_w = ld.width * global_scale;
-        let room_h = ld.height * global_scale;
+        let _global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
+        let room_x = (ld.x) * _global_scale - editor.camera_pos.x;
+        let room_y = (ld.y) * _global_scale - editor.camera_pos.y;
+        let room_w = ld.width * _global_scale;
+        let room_h = ld.height * _global_scale;
         let room_rect = egui::Rect::from_min_size(
             egui::Pos2::new(room_x, room_y),
             egui::Vec2::new(room_w, room_h),
@@ -659,8 +630,8 @@ fn render_all_rooms(
         // Cull rooms not in view
         if room_rect.intersects(expanded_view) {
             let sel = i == editor.current_level_index;
-            render_room_content(editor, painter, &ld, &json, tile_size, view, ctx);
-            render_room_outline_and_label(editor, painter, &ld, tile_size, ctx, sel);
+            render_room_content(editor, painter, &ld, &json, _tile_size, view, _ctx);
+            render_room_outline_and_label(editor, painter, &ld, _tile_size, _ctx, sel);
         }
     }
 }
@@ -669,9 +640,9 @@ fn render_all_rooms(
 fn render_current_room(
     editor: &mut CelesteMapEditor,
     painter: &egui::Painter,
-    tile_size: f32,
+    _tile_size: f32,
     view: Rect,
-    ctx: &egui::Context,
+    _ctx: &egui::Context,
 ) {
     let idx = editor.current_level_index;
     if idx < editor.cached_rooms.len() {
@@ -679,8 +650,8 @@ fn render_current_room(
             let room = &editor.cached_rooms[idx];
             (room.level_data.clone(), room.json.clone())
         };
-        render_room_content(editor, painter, &ld, &json, tile_size, view, ctx);
-        render_room_outline_and_label(editor, painter, &ld, tile_size, ctx, true);
+        render_room_content(editor, painter, &ld, &json, _tile_size, view, _ctx);
+        render_room_outline_and_label(editor, painter, &ld, _tile_size, _ctx, true);
     }
 }
 
@@ -704,7 +675,7 @@ fn render_top_panel(editor: &mut CelesteMapEditor, ctx: &egui::Context) {
                 if ui.button("Quit").clicked(){ std::process::exit(0); }
             });
             ui.menu_button("View",|ui|{
-                let prev=editor.show_fgdecals;
+                let _prev=editor.show_fgdecals;
                 if ui.checkbox(&mut editor.show_fgdecals,"Show Fg Decals").changed(){ editor.static_dirty=true; }
                 if ui.checkbox(&mut editor.show_tiles,"Show Tiles").changed(){ editor.static_dirty=true; }
                 ui.checkbox(&mut editor.show_all_rooms,"Show All Rooms");

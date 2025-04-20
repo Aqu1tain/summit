@@ -12,7 +12,7 @@ impl TileNeighbors {
         let mut mask = 0u8;
         let dirs = [(-1,0),( -1,1), (0,1), (1,1), (1,0), (1,-1), (0,-1), (-1,-1)];
         let h = grid.len() as isize;
-        let w = if h > 0 { grid[0].len() as isize } else { 0 };
+        let _w = if h > 0 { grid[0].len() as isize } else { 0 };
         for (i, (dy, dx)) in dirs.iter().enumerate() {
             let ny = y as isize + dy;
             let nx = x as isize + dx;

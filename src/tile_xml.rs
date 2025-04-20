@@ -77,13 +77,6 @@ pub fn get_tileset_path_for_id(map: &HashMap<char, String>, id: char) -> Option<
     map.get(&id).map(|s| s.as_str())
 }
 
-/// For a given tileset id, return the default tile coordinate (0,0) for the top-left 8x8 tile.
-/// If ForegroundTiles.xml does not specify, always return (0,0).
-pub fn get_first_tile_coords_for_id_or_default(_xml_path: &str, _id: char) -> (u32, u32) {
-    // Always return top-left tile
-    (0, 0)
-}
-
 pub static TILESET_ID_PATH_MAP_FG: OnceCell<HashMap<char, String>> = OnceCell::new();
 pub static TILESET_ID_PATH_MAP_BG: OnceCell<HashMap<char, String>> = OnceCell::new();
 
