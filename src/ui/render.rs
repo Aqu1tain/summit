@@ -188,9 +188,9 @@ fn render_any_tile(
     if !visible || tile == '0' || tile == ' ' {
         return;
     }
-    let scale = TILE_SIZE / 8.0;
-    let world_x0 = (ld.x + ld.offset_x as f32) * scale * editor.zoom_level;
-    let world_y0 = (ld.y + ld.offset_y as f32) * scale * editor.zoom_level;
+    let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
+    let world_x0 = (ld.x + ld.offset_x as f32) * global_scale;
+    let world_y0 = (ld.y + ld.offset_y as f32) * global_scale;
     let px = world_x0 + x as f32 * tile_size - editor.camera_pos.x;
     let py = world_y0 + y as f32 * tile_size - editor.camera_pos.y;
     let pos = Pos2::new(px, py);
@@ -294,6 +294,7 @@ fn render_tile(
     visible: bool,
 ) {
     ensure_tileset_id_path_map_loaded_from_celeste(editor);
+    let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
     render_any_tile(
         painter,
         ld,
@@ -325,6 +326,7 @@ fn render_bg_tile(
     visible: bool,
 ) {
     ensure_tileset_id_path_map_loaded_from_celeste(editor);
+    let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
     render_any_tile(
         painter,
         ld,
@@ -358,6 +360,7 @@ fn batch_render_tiles(
     let rect   = view.expand(margin);
 
     // convert room origin from Celeste pixels (8px units) into tile-space
+    let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
     let origin_tiles_x = (ld.x + ld.offset_x as f32) / 8.0;
     let origin_tiles_y = (ld.y + ld.offset_y as f32) / 8.0;
 
@@ -399,6 +402,7 @@ fn batch_render_bg_tiles(
     let margin = CULLING_THRESHOLD_BASE * (2.0 / editor.zoom_level.max(0.1));
     let rect   = view.expand(margin);
 
+    let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
     let origin_tiles_x = (ld.x + ld.offset_x as f32) / 8.0;
     let origin_tiles_y = (ld.y + ld.offset_y as f32) / 8.0;
 
@@ -450,11 +454,12 @@ fn render_bgdecals(
                         .as_ref()
                         .and_then(|am| am.get_sprite("Gameplay", &path))
                     {
-                        let center_x = (room_x + x) * scale * editor.zoom_level - editor.camera_pos.x;
-                        let center_y = (room_y + y) * scale * editor.zoom_level - editor.camera_pos.y;
+                        let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
+                        let center_x = (room_x + x) * global_scale - editor.camera_pos.x;
+                        let center_y = (room_y + y) * global_scale - editor.camera_pos.y;
 
-                        let width_px  = spr.metadata.width  as f32 * sx * scale * editor.zoom_level * DECAL_SCALE;
-                        let height_px = spr.metadata.height as f32 * sy * scale * editor.zoom_level * DECAL_SCALE;
+                        let width_px  = spr.metadata.width  as f32 * sx * global_scale * DECAL_SCALE;
+                        let height_px = spr.metadata.height as f32 * sy * global_scale * DECAL_SCALE;
 
                         let pos  = Pos2::new(center_x - width_px  * 0.5, center_y - height_px * 0.5);
                         let size = Vec2::new(width_px, height_px);
@@ -498,11 +503,12 @@ fn render_fgdecals(
                         .as_ref()
                         .and_then(|am| am.get_sprite("Gameplay", &path))
                     {
-                        let center_x = (room_x + x) * scale * editor.zoom_level - editor.camera_pos.x;
-                        let center_y = (room_y + y) * scale * editor.zoom_level - editor.camera_pos.y;
+                        let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
+                        let center_x = (room_x + x) * global_scale - editor.camera_pos.x;
+                        let center_y = (room_y + y) * global_scale - editor.camera_pos.y;
 
-                        let width_px  = spr.metadata.width  as f32 * sx * scale * editor.zoom_level * DECAL_SCALE;
-                        let height_px = spr.metadata.height as f32 * sy * scale * editor.zoom_level * DECAL_SCALE;
+                        let width_px  = spr.metadata.width  as f32 * sx * global_scale * DECAL_SCALE;
+                        let height_px = spr.metadata.height as f32 * sy * global_scale * DECAL_SCALE;
 
                         let pos  = Pos2::new(center_x - width_px  * 0.5, center_y - height_px * 0.5);
                         let size = Vec2::new(width_px, height_px);
@@ -552,14 +558,16 @@ fn render_room_content(
     // 2) Background tiles
     batch_render_bg_tiles(editor, painter, ld, tile_size, view, ctx);
     // 3) Background decals
-    render_bgdecals(editor, painter, json, TILE_SIZE / 8.0, ctx, ld.x, ld.y);
+    let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
+    render_bgdecals(editor, painter, json, global_scale, ctx, ld.x, ld.y);
     // 4) Foreground tiles
     if editor.show_tiles {
         batch_render_tiles(editor, painter, ld, tile_size, view, ctx);
     }
     // 5) Foreground decals
     if editor.show_fgdecals {
-        render_fgdecals(editor, painter, json, TILE_SIZE / 8.0, ctx, ld.x, ld.y);
+        let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
+        render_fgdecals(editor, painter, json, global_scale, ctx, ld.x, ld.y);
     }
     // 6) The rest (labels, outlines, etc) are handled after this function
 }
@@ -573,11 +581,11 @@ fn render_room_outline_and_label(
     ctx: &egui::Context,
     selected: bool,
 ) {
-    let scale=TILE_SIZE/8.0;
-    let px=(ld.x)*scale*editor.zoom_level-editor.camera_pos.x;
-    let py=(ld.y)*scale*editor.zoom_level-editor.camera_pos.y;
-    let w=ld.width*scale*editor.zoom_level;
-    let h=ld.height*scale*editor.zoom_level;
+    let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
+    let px=(ld.x)*global_scale-editor.camera_pos.x;
+    let py=(ld.y)*global_scale-editor.camera_pos.y;
+    let w=ld.width*global_scale;
+    let h=ld.height*global_scale;
     let rect=Rect::from_min_size(Pos2::new(px,py),Vec2::new(w,h));
     let col=if selected {ROOM_CONTOUR_SELECTED} else {ROOM_CONTOUR_UNSELECTED};
     let th=if selected {3.0} else {2.0};
@@ -622,11 +630,11 @@ fn render_all_rooms(
             (room.level_data.clone(), room.json.clone())
         };
         // Compute room rectangle in world coordinates
-        let scale = TILE_SIZE / 8.0;
-        let room_x = (ld.x) * scale * editor.zoom_level - editor.camera_pos.x;
-        let room_y = (ld.y) * scale * editor.zoom_level - editor.camera_pos.y;
-        let room_w = ld.width * scale * editor.zoom_level;
-        let room_h = ld.height * scale * editor.zoom_level;
+        let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
+        let room_x = (ld.x) * global_scale - editor.camera_pos.x;
+        let room_y = (ld.y) * global_scale - editor.camera_pos.y;
+        let room_w = ld.width * global_scale;
+        let room_h = ld.height * global_scale;
         let room_rect = egui::Rect::from_min_size(
             egui::Pos2::new(room_x, room_y),
             egui::Vec2::new(room_w, room_h),
