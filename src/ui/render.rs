@@ -82,8 +82,8 @@ pub(crate) fn extract_level_data(level: &serde_json::Value, editor: &CelesteMapE
 
     let mut solids = Vec::new();
     let mut bg = Vec::new();
-    let mut offset_x = 0;
-    let mut offset_y = 0;
+    let offset_x = 0;
+    let offset_y = 0;
     if let Some(children) = level["__children"].as_array() {
         for child in children {
             if child["__name"] == "solids" {

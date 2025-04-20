@@ -369,7 +369,7 @@ pub fn mask_matches(neighborhood: &[[char; 3]; 3], mask: &str, is_solid: &dyn Fn
 pub fn get_neighborhood(solids: &Vec<Vec<char>>, x: usize, y: usize) -> [[char; 3]; 3] {
     let mut n = [['\0'; 3]; 3];
     let h = solids.len() as isize;
-    let w = if h > 0 { solids[0].len() as isize } else { 0 };
+    let _w = if h > 0 { solids[0].len() as isize } else { 0 };
     for dy in -1..=1 {
         for dx in -1..=1 {
             let nx = x as isize + dx;
