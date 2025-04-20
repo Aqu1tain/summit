@@ -346,19 +346,53 @@ fn render_bg_tile(
     );
 }
 
+/// Calcule le début de la grille (pour x ou y)
+fn compute_grid_start(cam_coord: f32, tile_size: f32) -> f32 {
+    cam_coord % tile_size
+}
+
+/// Calcule le pas de la grille selon le zoom
+fn compute_grid_step(zoom: f32) -> usize {
+    if zoom < 0.5 { 2 } else { 1 }
+}
+
+/// Calcule l'épaisseur de la grille selon le zoom
+fn compute_grid_thickness(zoom: f32) -> f32 {
+    if zoom < 0.5 { 0.5 } else { 1.0 }
+}
+
+/// Draw grid lines
+fn draw_grid(painter: &egui::Painter, view: Rect, cam: Vec2, tile_size: f32, zoom: f32) {
+    if zoom < 0.2 { return; }
+    let start_x = compute_grid_start(cam.x, tile_size);
+    let start_y = compute_grid_start(cam.y, tile_size);
+    let step = compute_grid_step(zoom);
+    let th = compute_grid_thickness(zoom);
+    for i in (0..((view.width()/tile_size) as i32+2)).step_by(step) {
+        let x = i as f32 * tile_size - start_x;
+        painter.line_segment([
+            Pos2::new(x, 0.0),
+            Pos2::new(x, view.height())
+        ], Stroke::new(th, GRID_COLOR));
+    }
+    for i in (0..((view.height()/tile_size) as i32+2)).step_by(step) {
+        let y = i as f32 * tile_size - start_y;
+        painter.line_segment([
+            Pos2::new(0.0, y),
+            Pos2::new(view.width(), y)
+        ], Stroke::new(th, GRID_COLOR));
+    }
+}
+
 /// Batch render tiles
 fn batch_render_tiles(
     editor: &mut CelesteMapEditor,
     painter: &egui::Painter,
     ld: &LevelRenderData,
     tile_size: f32,
-    view: Rect,
+    rect: Rect,
     _ctx: &egui::Context,
 ) {
-    // expand the visible area by a zoom‑aware margin
-    let margin = CULLING_THRESHOLD_BASE * (2.0 / editor.zoom_level.max(0.1));
-    let rect   = view.expand(margin);
-
     // convert room origin from Celeste pixels (8px units) into tile-space
     let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
     let origin_tiles_x = (ld.x + ld.offset_x as f32) / 8.0;
@@ -395,17 +429,15 @@ fn batch_render_bg_tiles(
     painter: &egui::Painter,
     ld: &LevelRenderData,
     tile_size: f32,
-    view: Rect,
+    rect: Rect,
     _ctx: &egui::Context,
 ) {
-    // expand the visible area by a zoom‑aware margin
-    let margin = CULLING_THRESHOLD_BASE * (2.0 / editor.zoom_level.max(0.1));
-    let rect   = view.expand(margin);
-
+    // convert room origin from Celeste pixels (8px units) into tile-space
     let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
     let origin_tiles_x = (ld.x + ld.offset_x as f32) / 8.0;
     let origin_tiles_y = (ld.y + ld.offset_y as f32) / 8.0;
 
+    // compute the range of tile indices intersecting our expanded view
     let start_x = ((rect.min.x + editor.camera_pos.x) / tile_size - origin_tiles_x)
         .floor()
         .max(0.0) as usize;
@@ -527,22 +559,6 @@ fn render_fgdecals(
     }
 }
 
-/// Draw grid lines
-fn draw_grid(painter: &egui::Painter, view: Rect, cam: Vec2, tile_size: f32, zoom: f32) {
-    if zoom<0.2 { return; }
-    let start_x=cam.x%tile_size; let start_y=cam.y%tile_size;
-    let step=if zoom<0.5 {2} else {1};
-    let th=if zoom<0.5 {0.5} else {1.0};
-    for i in (0..((view.width()/tile_size) as i32+2)).step_by(step) {
-        let x=i as f32*tile_size-start_x;
-        painter.line_segment([Pos2::new(x,0.0),Pos2::new(x,view.height())],Stroke::new(th,GRID_COLOR));
-    }
-    for i in (0..((view.height()/tile_size) as i32+2)).step_by(step) {
-        let y=i as f32*tile_size-start_y;
-        painter.line_segment([Pos2::new(0.0,y),Pos2::new(view.width(),y)],Stroke::new(th,GRID_COLOR));
-    }
-}
-
 /// Render room content
 fn render_room_content(
     editor: &mut CelesteMapEditor,
@@ -556,13 +572,15 @@ fn render_room_content(
     // 1) Topmost overlays (top, grid)
     // (Grid is drawn in render_central_panel, not here)
     // 2) Background tiles
-    batch_render_bg_tiles(editor, painter, ld, tile_size, view, ctx);
+    let margin = CULLING_THRESHOLD_BASE * (2.0 / editor.zoom_level.max(0.1));
+    let expanded_view = view.expand(margin);
+    batch_render_bg_tiles(editor, painter, ld, tile_size, expanded_view, ctx);
     // 3) Background decals
     let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
     render_bgdecals(editor, painter, json, global_scale, ctx, ld.x, ld.y);
     // 4) Foreground tiles
     if editor.show_tiles {
-        batch_render_tiles(editor, painter, ld, tile_size, view, ctx);
+        batch_render_tiles(editor, painter, ld, tile_size, expanded_view, ctx);
     }
     // 5) Foreground decals
     if editor.show_fgdecals {
