@@ -1,5 +1,6 @@
 use eframe::egui::Pos2;
 use crate::app::CelesteMapEditor;
+use log::{warn};
 
 pub fn place_block(editor: &mut CelesteMapEditor, pos: Pos2) {
     // If in "all rooms" mode, determine which room was clicked
@@ -69,7 +70,7 @@ pub fn place_block_in_current_room(editor: &mut CelesteMapEditor, pos: Pos2) {
                 || tile_x >= room_x_tiles + room_width_tiles
                 || tile_y >= room_y_tiles + room_height_tiles
             {
-                println!("Attempted to place block outside of room boundaries!");
+                warn!("Attempted to place block outside of room boundaries!");
                 return;
             }
         }
@@ -99,7 +100,7 @@ pub fn place_block_in_current_room(editor: &mut CelesteMapEditor, pos: Pos2) {
 
         // Skip if position would be negative after adjustment
         if adjusted_x < 0 || adjusted_y < 0 {
-            println!("Cannot place block at negative position after offset adjustment");
+            warn!("Cannot place block at negative position after offset adjustment");
             return;
         }
 

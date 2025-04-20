@@ -9,6 +9,7 @@ use byteorder::{LittleEndian, ReadBytesExt};
 use eframe::egui;
 use image::RgbaImage;
 use lazy_static::lazy_static;
+use log::{debug, info, warn, error};
 
 /// Metadata for a sprite in a Celeste atlas
 #[derive(Debug, Clone)]
@@ -80,7 +81,7 @@ impl AtlasManager {
 
     /// Load a Celeste atlas from a .meta file
     pub fn load_atlas(&mut self, name: &str, celeste_dir: &Path, ctx: &egui::Context) -> io::Result<()> {
-        println!("[DEBUG] Loading atlas '{}'", name);
+        debug!("Loading atlas '{}'", name);
         // On MacOS, Celeste's assets are inside Celeste.app/Contents/Resources/Content/Graphics/Atlases
         // If the provided celeste_dir contains 'Celeste.app', use as-is. Otherwise, append 'Celeste.app'.
         let mut atlas_base = celeste_dir.to_path_buf();
@@ -110,9 +111,9 @@ impl AtlasManager {
         let mut atlas = Atlas::new(name);
         self.load_meta_file(&meta_path, &mut atlas, &atlas_path, ctx)?;
 
-        println!("[DEBUG] Loaded {} sprites in atlas '{}'", atlas.sprites.len(), name);
-        println!("[DEBUG] Loaded {} textures in atlas '{}'", atlas.textures.len(), name);
-        println!("[DEBUG] Loaded {} images in atlas '{}'", atlas.images.len(), name);
+        debug!("Loaded {} sprites in atlas '{}'", atlas.sprites.len(), name);
+        debug!("Loaded {} textures in atlas '{}'", atlas.textures.len(), name);
+        debug!("Loaded {} images in atlas '{}'", atlas.images.len(), name);
 
         // Update texture ID to atlas mapping
         for texture in atlas.textures.values() {
@@ -230,14 +231,14 @@ impl AtlasManager {
     /// Load a Celeste .data file which contains a run-length encoded image
     pub fn load_data_file(&self, data_path: &Path) -> io::Result<RgbaImage> {
         use std::io::Read;
-        println!("[AtlasManager::load_data_file] Attempting to open .data file: {}", data_path.display());
+        debug!("Attempting to open .data file: {}", data_path.display());
         let mut file = File::open(data_path)?;
 
         // Read header: width (i32), height (i32), has_alpha (u8)
         let width = file.read_i32::<LittleEndian>()? as u32;
         let height = file.read_i32::<LittleEndian>()? as u32;
         let has_alpha = file.read_u8()? != 0;
-        println!("[AtlasManager::load_data_file] width: {width}, height: {height}, has_alpha: {has_alpha}");
+        debug!("width: {width}, height: {height}, has_alpha: {has_alpha}");
 
         let mut pixels = Vec::with_capacity((width * height * 4) as usize);
         let mut total_pixels = 0u32;
@@ -281,7 +282,7 @@ impl AtlasManager {
             total_pixels += 1;
         }
 
-        println!("[AtlasManager::load_data_file] Finished decoding. Total pixels: {}", pixels.len() / 4);
+        debug!("Finished decoding. Total pixels: {}", pixels.len() / 4);
         let image = RgbaImage::from_vec(width, height, pixels)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "failed to create image from buffer"))?;
         Ok(image)
@@ -297,18 +298,27 @@ impl AtlasManager {
             pixels.as_slice()
         );
 
-        ctx.load_texture(name, color_image, Default::default())
+        ctx.load_texture(name, color_image, egui::TextureFilter::Nearest)
     }
 
     /// Get a sprite by path from a specific atlas
     pub fn get_sprite(&self, atlas_name: &str, sprite_path: &str) -> Option<&Sprite> {
-        println!("[DEBUG] get_sprite('{}', '{}')", atlas_name, sprite_path);
-        self.atlases.get(atlas_name).and_then(|atlas| atlas.get_sprite(sprite_path))
+        if let Some(atlas) = self.atlases.get(atlas_name) {
+            if !atlas.sprites.contains_key(sprite_path) {
+                debug!("Sprite not found: '{}'. Available keys (first 10): {:?}", sprite_path, atlas.sprites.keys().take(10).collect::<Vec<_>>());
+            } else {
+                debug!("Sprite found: '{}'", sprite_path);
+            }
+            atlas.get_sprite(sprite_path)
+        } else {
+            debug!("Atlas '{}' not found!", atlas_name);
+            None
+        }
     }
 
     /// Get the raw image data from an atlas
     pub fn get_atlas_image(&self, atlas_name: &str, data_file: &str) -> Option<&RgbaImage> {
-        println!("[DEBUG] get_atlas_image('{}', '{}')", atlas_name, data_file);
+        debug!("get_atlas_image('{}', '{}')", atlas_name, data_file);
         self.atlases.get(atlas_name)?.images.get(data_file)
     }
 
@@ -339,19 +349,61 @@ impl AtlasManager {
         let atlas_width = texture.size_vec2().x;
         let atlas_height = texture.size_vec2().y;
 
-        // Calculate UV coordinates for the sprite within the atlas
+        // Sprite metadata gives the position of the full tileset in the atlas
+        let sprite_x = sprite.metadata.x as f32;
+        let sprite_y = sprite.metadata.y as f32;
+        // Compute UV coordinates for the sprite within the atlas
         let uv_min = egui::pos2(
-            sprite.metadata.x as f32 / atlas_width,
-            sprite.metadata.y as f32 / atlas_height,
+            sprite_x / atlas_width,
+            sprite_y / atlas_height,
         );
         let uv_max = egui::pos2(
-            (sprite.metadata.x as f32 + sprite.metadata.width as f32) / atlas_width,
-            (sprite.metadata.y as f32 + sprite.metadata.height as f32) / atlas_height,
+            (sprite_x + sprite.metadata.width as f32) / atlas_width,
+            (sprite_y + sprite.metadata.height as f32) / atlas_height,
         );
 
         let uv_rect = egui::Rect::from_min_max(uv_min, uv_max);
 
         // Create mesh for the sprite
+        let mut mesh = egui::epaint::Mesh::with_texture(sprite.texture_id);
+        mesh.add_rect_with_uv(rect, uv_rect, tint);
+        painter.add(egui::epaint::Shape::mesh(mesh));
+    }
+
+    /// Draw a sprite subregion to the screen (e.g., an 8x8 tile from a tileset)
+    pub fn draw_sprite_region(
+        &self,
+        sprite: &Sprite,
+        painter: &egui::Painter,
+        rect: egui::Rect,
+        tint: egui::Color32,
+        region: egui::Rect, // in sprite-local pixel coordinates
+    ) {
+        let atlas_name = match self.texture_id_to_atlas.get(&sprite.texture_id) {
+            Some(name) => name,
+            None => return,
+        };
+        let atlas = match self.atlases.get(atlas_name) {
+            Some(atlas) => atlas,
+            None => return,
+        };
+        let texture = atlas.textures.values().find(|t| t.id() == sprite.texture_id).unwrap();
+        let atlas_width = texture.size_vec2().x;
+        let atlas_height = texture.size_vec2().y;
+        // Sprite metadata gives the position of the full tileset in the atlas
+        let sprite_x = sprite.metadata.x as f32;
+        let sprite_y = sprite.metadata.y as f32;
+        // Compute UVs for the subregion
+        let uv_min = egui::pos2(
+            (sprite_x + region.min.x) / atlas_width,
+            (sprite_y + region.min.y) / atlas_height,
+        );
+        let uv_max = egui::pos2(
+            (sprite_x + region.max.x) / atlas_width,
+            (sprite_y + region.max.y) / atlas_height,
+        );
+        let uv_rect = egui::Rect::from_min_max(uv_min, uv_max);
+        // Create mesh for the subregion
         let mut mesh = egui::epaint::Mesh::with_texture(sprite.texture_id);
         mesh.add_rect_with_uv(rect, uv_rect, tint);
         painter.add(egui::epaint::Shape::mesh(mesh));

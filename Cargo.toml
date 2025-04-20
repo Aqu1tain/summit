@@ -19,5 +19,9 @@ cairn = { git = "https://github.com/Aqu1tain/cairn.git" }
 byteorder = "1.4"
 quick-xml = "0.31"
 lazy_static = "1.4"
+once_cell = "1.19"
 # Explicitly add latest winit for compatibility with rfd
 winit = "0.28"
+rand = "0.9.1"
+log = "0.4"
+env_logger = "0.10"
