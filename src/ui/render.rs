@@ -188,9 +188,9 @@ fn render_any_tile(
     if !visible || _tile == '0' || _tile == ' ' {
         return;
     }
-    let _global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
-    let world_x0 = (ld.x + ld.offset_x as f32) * _global_scale;
-    let world_y0 = (ld.y + ld.offset_y as f32) * _global_scale;
+    let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
+    let world_x0 = (ld.x + ld.offset_x as f32) * global_scale;
+    let world_y0 = (ld.y + ld.offset_y as f32) * global_scale;
     let px = world_x0 + x as f32 * tile_size - editor.camera_pos.x;
     let py = world_y0 + y as f32 * tile_size - editor.camera_pos.y;
     let pos = Pos2::new(px, py);
@@ -281,7 +281,6 @@ fn render_tile(
     visible: bool,
 ) {
     ensure_tileset_id_path_map_loaded_from_celeste(editor);
-    let _global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
     render_any_tile(
         painter,
         ld,
@@ -313,7 +312,6 @@ fn render_bg_tile(
     visible: bool,
 ) {
     ensure_tileset_id_path_map_loaded_from_celeste(editor);
-    let _global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
     render_any_tile(
         painter,
         ld,
@@ -359,12 +357,12 @@ fn render_decals(
                         .as_ref()
                         .and_then(|am| am.get_sprite("Gameplay", &path))
                     {
-                        let _global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
-                        let center_x = (room_x + x) * _global_scale - editor.camera_pos.x;
-                        let center_y = (room_y + y) * _global_scale - editor.camera_pos.y;
+                        let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
+                        let center_x = (room_x + x) * global_scale - editor.camera_pos.x;
+                        let center_y = (room_y + y) * global_scale - editor.camera_pos.y;
 
-                        let width_px  = spr.metadata.width  as f32 * sx * _global_scale * DECAL_SCALE;
-                        let height_px = spr.metadata.height as f32 * sy * _global_scale * DECAL_SCALE;
+                        let width_px  = spr.metadata.width  as f32 * sx * global_scale * DECAL_SCALE;
+                        let height_px = spr.metadata.height as f32 * sy * global_scale * DECAL_SCALE;
 
                         let pos  = Pos2::new(center_x - width_px  * 0.5, center_y - height_px * 0.5);
                         let size = Vec2::new(width_px, height_px);
@@ -430,21 +428,20 @@ fn batch_render_tiles(
     _ctx: &egui::Context,
 ) {
     // convert room origin from Celeste pixels (8px units) into tile-space
-    let _global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
     let origin_tiles_x = (ld.x + ld.offset_x as f32) / 8.0;
     let origin_tiles_y = (ld.y + ld.offset_y as f32) / 8.0;
 
     // compute the range of tile indices intersecting our expanded view
-    let start_x = ((rect.min.x + editor.camera_pos.x) / _tile_size - origin_tiles_x)
+    let start_x = ((rect.min.x + editor.camera_pos.x) / (TILE_SIZE * editor.zoom_level) - origin_tiles_x)
         .floor()
         .max(0.0) as usize;
-    let start_y = ((rect.min.y + editor.camera_pos.y) / _tile_size - origin_tiles_y)
+    let start_y = ((rect.min.y + editor.camera_pos.y) / (TILE_SIZE * editor.zoom_level) - origin_tiles_y)
         .floor()
         .max(0.0) as usize;
-    let end_x   = ((rect.max.x + editor.camera_pos.x) / _tile_size - origin_tiles_x)
+    let end_x   = ((rect.max.x + editor.camera_pos.x) / (TILE_SIZE * editor.zoom_level) - origin_tiles_x)
         .ceil()
         .max(0.0) as usize;
-    let end_y   = ((rect.max.y + editor.camera_pos.y) / _tile_size - origin_tiles_y)
+    let end_y   = ((rect.max.y + editor.camera_pos.y) / (TILE_SIZE * editor.zoom_level) - origin_tiles_y)
         .ceil()
         .max(0.0) as usize;
 
@@ -454,7 +451,7 @@ fn batch_render_tiles(
         for xx in start_x..=end_x {
             if xx >= ld.solids[yy].len() { continue; }
             let _tile = ld.solids[yy][xx];
-            render_tile(painter, ld, editor, xx, yy, _tile, _tile_size, true);
+            render_tile(painter, ld, editor, xx, yy, _tile, TILE_SIZE * editor.zoom_level, true);
         }
     }
 }
@@ -469,21 +466,20 @@ fn batch_render_bg_tiles(
     _ctx: &egui::Context,
 ) {
     // convert room origin from Celeste pixels (8px units) into tile-space
-    let _global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
     let origin_tiles_x = (ld.x + ld.offset_x as f32) / 8.0;
     let origin_tiles_y = (ld.y + ld.offset_y as f32) / 8.0;
 
     // compute the range of tile indices intersecting our expanded view
-    let start_x = ((rect.min.x + editor.camera_pos.x) / _tile_size - origin_tiles_x)
+    let start_x = ((rect.min.x + editor.camera_pos.x) / (TILE_SIZE * editor.zoom_level) - origin_tiles_x)
         .floor()
         .max(0.0) as usize;
-    let start_y = ((rect.min.y + editor.camera_pos.y) / _tile_size - origin_tiles_y)
+    let start_y = ((rect.min.y + editor.camera_pos.y) / (TILE_SIZE * editor.zoom_level) - origin_tiles_y)
         .floor()
         .max(0.0) as usize;
-    let end_x   = ((rect.max.x + editor.camera_pos.x) / _tile_size - origin_tiles_x)
+    let end_x   = ((rect.max.x + editor.camera_pos.x) / (TILE_SIZE * editor.zoom_level) - origin_tiles_x)
         .ceil()
         .max(0.0) as usize;
-    let end_y   = ((rect.max.y + editor.camera_pos.y) / _tile_size - origin_tiles_y)
+    let end_y   = ((rect.max.y + editor.camera_pos.y) / (TILE_SIZE * editor.zoom_level) - origin_tiles_y)
         .ceil()
         .max(0.0) as usize;
 
@@ -492,7 +488,7 @@ fn batch_render_bg_tiles(
         for xx in start_x..=end_x {
             if xx >= ld.bg[yy].len() { continue; }
             let _tile = ld.bg[yy][xx];
-            render_bg_tile(painter, ld, editor, xx, yy, _tile, _tile_size, true);
+            render_bg_tile(painter, ld, editor, xx, yy, _tile, TILE_SIZE * editor.zoom_level, true);
         }
     }
 }
@@ -542,12 +538,11 @@ impl Layer for BgDecalLayer {
         ctx: &egui::Context,
     ) {
         if let Some(json) = json {
-            let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
             render_decals(
                 editor,
                 painter,
                 json,
-                global_scale,
+                TILE_SIZE * editor.zoom_level,
                 ctx,
                 ld.x,
                 ld.y,
@@ -591,12 +586,11 @@ impl Layer for FgDecalLayer {
     ) {
         if editor.show_fgdecals {
             if let Some(json) = json {
-                let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
                 render_decals(
                     editor,
                     painter,
                     json,
-                    global_scale,
+                    TILE_SIZE * editor.zoom_level,
                     ctx,
                     ld.x,
                     ld.y,
@@ -672,11 +666,11 @@ fn render_all_rooms(
             (room.level_data.clone(), room.json.clone())
         };
         // Compute room rectangle in world coordinates
-        let _global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
-        let room_x = (ld.x) * _global_scale - editor.camera_pos.x;
-        let room_y = (ld.y) * _global_scale - editor.camera_pos.y;
-        let room_w = ld.width * _global_scale;
-        let room_h = ld.height * _global_scale;
+        let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
+        let room_x = (ld.x) * global_scale - editor.camera_pos.x;
+        let room_y = (ld.y) * global_scale - editor.camera_pos.y;
+        let room_w = ld.width * global_scale;
+        let room_h = ld.height * global_scale;
         let room_rect = egui::Rect::from_min_size(
             egui::Pos2::new(room_x, room_y),
             egui::Vec2::new(room_w, room_h),
@@ -721,11 +715,11 @@ fn render_room_outline_and_label(
     _ctx: &egui::Context,
     selected: bool,
 ) {
-    let _global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
-    let px=(ld.x)*_global_scale-editor.camera_pos.x;
-    let py=(ld.y)*_global_scale-editor.camera_pos.y;
-    let w=ld.width*_global_scale;
-    let h=ld.height*_global_scale;
+    let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
+    let px=(ld.x)*global_scale-editor.camera_pos.x;
+    let py=(ld.y)*global_scale-editor.camera_pos.y;
+    let w=ld.width*global_scale;
+    let h=ld.height*global_scale;
     let rect=Rect::from_min_size(Pos2::new(px,py),Vec2::new(w,h));
     let col=if selected {ROOM_CONTOUR_SELECTED} else {ROOM_CONTOUR_UNSELECTED};
     let th=if selected {3.0} else {2.0};
