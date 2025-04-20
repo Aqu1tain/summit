@@ -6,6 +6,7 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 use crate::app::CelesteMapEditor;
 use log::debug;
+use std::path::PathBuf;
 
 /// Loads a mapping from tile id (char) to tileset path from a ForegroundTiles.xml or BackgroundTiles.xml file.
 pub fn load_tileset_id_path_map(xml_path: &str) -> HashMap<char, String> {
@@ -85,7 +86,7 @@ pub fn ensure_tileset_id_path_map_loaded_from_celeste(editor: &CelesteMapEditor)
     // Load foreground tileset map
     if TILESET_ID_PATH_MAP_FG.get().is_none() {
         if let Some(ref celeste_dir) = editor.celeste_assets.celeste_dir {
-            let mut xml_path = celeste_dir.clone();
+            let mut xml_path = PathBuf::from(celeste_dir);
             #[cfg(target_os = "macos")]
             {
                 if !xml_path.ends_with("Celeste.app") {
@@ -121,7 +122,7 @@ pub fn ensure_tileset_id_path_map_loaded_from_celeste(editor: &CelesteMapEditor)
     // Load background tileset map
     if TILESET_ID_PATH_MAP_BG.get().is_none() {
         if let Some(ref celeste_dir) = editor.celeste_assets.celeste_dir {
-            let mut xml_path = celeste_dir.clone();
+            let mut xml_path = PathBuf::from(celeste_dir);
             #[cfg(target_os = "macos")]
             {
                 if !xml_path.ends_with("Celeste.app") {

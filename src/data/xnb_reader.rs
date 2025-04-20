@@ -6,7 +6,7 @@ use std::fs::File;
 use std::path::Path;
 use image::RgbaImage;
 
-use crate::binary_reader::BinaryReader;
+use crate::data::binary_reader::BinaryReader;
 
 // Custom error type for XNB-related errors
 #[derive(Debug)]

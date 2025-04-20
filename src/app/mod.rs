@@ -8,7 +8,8 @@ use crate::config::keybindings::KeyBindings;
 use crate::ui::render::render_app;
 use crate::ui::input::handle_input;
 use crate::ui::dialogs::{show_open_dialog, show_key_bindings_dialog, show_celeste_path_dialog};
-use crate::assets::CelesteAssets;
+use crate::data::assets::CelesteAssets;
+use crate::data::celeste_atlas::AtlasManager;
 
 /// Cached representation of a room’s layout with autotile cache.
 #[derive(Clone)]
@@ -50,7 +51,7 @@ pub struct CelesteMapEditor {
     /// Cache for each room’s pre-parsed solids data.
     pub cached_rooms: Vec<CachedRoom>,
     // Add AtlasManager for texture atlases
-    pub atlas_manager: Option<crate::celeste_atlas::AtlasManager>,
+    pub atlas_manager: Option<AtlasManager>,
     pub render_fgtiles_mode: bool, // If true, render fgdecals as tiles instead of solid blocks
     pub show_fgdecals: bool, // If true, render fgdecals on all rooms
     pub static_shapes: Option<Vec<egui::Shape>>,
@@ -104,7 +105,7 @@ impl CelesteMapEditor {
         // Check if Celeste assets are available, show dialog if not.
         if let Some(ref celeste_dir) = editor.celeste_assets.celeste_dir {
             // Initialize atlas manager if Celeste directory is found.
-            let mut atlas_manager = crate::celeste_atlas::AtlasManager::new();
+            let mut atlas_manager = AtlasManager::new();
             // Try to load the main atlas (e.g., Gameplay)
             let ctx = &cc.egui_ctx;
             let result = atlas_manager.load_atlas("Gameplay", celeste_dir, ctx);

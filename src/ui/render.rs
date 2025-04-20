@@ -2,7 +2,7 @@ use eframe::egui;
 use egui::{Color32, Pos2, Rect, Stroke, Vec2};
 use crate::app::CelesteMapEditor;
 use crate::map::loader::{save_map, save_map_as};
-use crate::tile_xml::{get_tileset_path_for_id, ensure_tileset_id_path_map_loaded_from_celeste};
+use crate::data::tile_xml::{self, ensure_tileset_id_path_map_loaded_from_celeste};
 use log::debug;
 use crate::ui::tile_neighbors::TileNeighbors;
 
@@ -41,21 +41,21 @@ pub struct LevelRenderData {
 
 impl LevelRenderData {
     pub fn compute_autotile_coords(&mut self, xml_path: &str) {
-        let tilesets = crate::tile_xml::get_tilesets_with_rules(xml_path);
+        let tilesets = tile_xml::get_tilesets_with_rules(xml_path);
         let is_solid = |c: char| is_solid_tile(c);
         self.autotile_coords = self.solids.iter().enumerate().map(|(y, row)| {
             row.iter().enumerate().map(|(x, &tile)| {
-                crate::tile_xml::autotile_tile_coord(tile, &self.solids, x, y, tilesets, &is_solid)
+                tile_xml::autotile_tile_coord(tile, &self.solids, x, y, tilesets, &is_solid)
             }).collect()
         }).collect();
     }
 
     pub fn compute_bg_autotile_coords(&mut self, xml_path: &str) {
-        let tilesets = crate::tile_xml::get_tilesets_with_rules(xml_path);
+        let tilesets = tile_xml::get_tilesets_with_rules(xml_path);
         let is_air = |c: char| c == '0'; // treat '0' as air, everything else as filled
         self.bg_autotile_coords = self.bg.iter().enumerate().map(|(y, row)| {
             row.iter().enumerate().map(|(x, &tile)| {
-                crate::tile_xml::autotile_tile_coord(tile, &self.bg, x, y, tilesets, &|c| !is_air(c))
+                tile_xml::autotile_tile_coord(tile, &self.bg, x, y, tilesets, &|c| !is_air(c))
             }).collect()
         }).collect();
     }
@@ -162,7 +162,7 @@ fn render_any_tile(
         #[cfg(debug_assertions)]
         debug!("[{} TILE DEBUG] tile char: {}", debug_tag, _tile);
         if let Some(map) = tileset_id_path_map {
-            if let Some(path) = get_tileset_path_for_id(map, _tile) {
+            if let Some(path) = tile_xml::get_tileset_path_for_id(map, _tile) {
                 #[cfg(debug_assertions)]
                 debug!("[{} TILE DEBUG] tileset path for '{}': {}", debug_tag, _tile, path);
                 let sprite_path = format!("tilesets/{}", path);
@@ -206,7 +206,7 @@ fn render_any_tile(
     if !autotile_coords.is_empty() {
         if let Some(coord) = autotile_coords.get(y).and_then(|row| row.get(x)).and_then(|v| *v) {
             if let Some(map) = tileset_id_path_map {
-                if let Some(path) = get_tileset_path_for_id(map, _tile) {
+                if let Some(path) = tile_xml::get_tileset_path_for_id(map, _tile) {
                     let region = egui::Rect::from_min_size(
                         egui::Pos2::new((coord.0 * 8) as f32, (coord.1 * 8) as f32),
                         egui::Vec2::new(8.0, 8.0),
@@ -224,9 +224,9 @@ fn render_any_tile(
     } else {
         // fallback: recompute on the fly (shouldn't happen)
         if let Some(map) = tileset_id_path_map {
-            if let Some(path) = get_tileset_path_for_id(map, _tile) {
-                let tilesets = crate::tile_xml::get_tilesets_with_rules(xml_path);
-                if let Some((tile_x, tile_y)) = crate::tile_xml::autotile_tile_coord(_tile, tiles, x, y, tilesets, &|c| !is_air_or_empty(c)) {
+            if let Some(path) = tile_xml::get_tileset_path_for_id(map, _tile) {
+                let tilesets = tile_xml::get_tilesets_with_rules(xml_path);
+                if let Some((tile_x, tile_y)) = tile_xml::autotile_tile_coord(_tile, tiles, x, y, tilesets, &|c| !is_air_or_empty(c)) {
                     let region = egui::Rect::from_min_size(
                         egui::Pos2::new((tile_x * 8) as f32, (tile_y * 8) as f32),
                         egui::Vec2::new(8.0, 8.0),
@@ -294,7 +294,7 @@ fn render_tile(
         visible,
         &|c| !is_solid_tile(c),
         SOLID_TILE_COLOR,
-        crate::tile_xml::TILESET_ID_PATH_MAP_FG.get(),
+        tile_xml::TILESET_ID_PATH_MAP_FG.get(),
         &ld.fg_xml_path,
         "FG",
     );
@@ -325,7 +325,7 @@ fn render_bg_tile(
         visible,
         &|c| c == '0',
         INFILL_COLOR,
-        crate::tile_xml::TILESET_ID_PATH_MAP_BG.get(),
+        tile_xml::TILESET_ID_PATH_MAP_BG.get(),
         &ld.bg_xml_path,
         "BG",
     );
@@ -813,7 +813,7 @@ fn get_celeste_fgtiles_xml_path_from_editor(editor: &CelesteMapEditor) -> String
     if let Some(ref celeste_dir) = editor.celeste_assets.celeste_dir {
         #[cfg(target_os = "macos")]
         {
-            let mut p = celeste_dir.clone();
+            let mut p = std::path::PathBuf::from(celeste_dir);
             if !p.ends_with("Celeste.app") {
                 p = p.join("Celeste.app");
             }
@@ -821,7 +821,7 @@ fn get_celeste_fgtiles_xml_path_from_editor(editor: &CelesteMapEditor) -> String
         }
         #[cfg(not(target_os = "macos") )]
         {
-            celeste_dir.join("Content/Graphics/ForegroundTiles.xml").to_string_lossy().to_string()
+            std::path::PathBuf::from(celeste_dir).join("Content/Graphics/ForegroundTiles.xml").to_string_lossy().to_string()
         }
     } else {
         String::new()
@@ -833,7 +833,7 @@ fn get_celeste_bgtiles_xml_path_from_editor(editor: &CelesteMapEditor) -> String
     if let Some(ref celeste_dir) = editor.celeste_assets.celeste_dir {
         #[cfg(target_os = "macos")]
         {
-            let mut p = celeste_dir.clone();
+            let mut p = std::path::PathBuf::from(celeste_dir);
             if !p.ends_with("Celeste.app") {
                 p = p.join("Celeste.app");
             }
@@ -841,7 +841,7 @@ fn get_celeste_bgtiles_xml_path_from_editor(editor: &CelesteMapEditor) -> String
         }
         #[cfg(not(target_os = "macos") )]
         {
-            celeste_dir.join("Content/Graphics/BackgroundTiles.xml").to_string_lossy().to_string()
+            std::path::PathBuf::from(celeste_dir).join("Content/Graphics/BackgroundTiles.xml").to_string_lossy().to_string()
         }
     } else {
         String::new()
