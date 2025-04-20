@@ -497,76 +497,162 @@ fn batch_render_bg_tiles(
     }
 }
 
+/// --- ECS-Like Layer System ---
+pub trait Layer {
+    fn render(
+        &self,
+        editor: &mut CelesteMapEditor,
+        painter: &egui::Painter,
+        ld: &LevelRenderData,
+        json: Option<&serde_json::Value>,
+        tile_size: f32,
+        view: Rect,
+        ctx: &egui::Context,
+    );
+}
+
+pub struct BgTileLayer;
+impl Layer for BgTileLayer {
+    fn render(
+        &self,
+        editor: &mut CelesteMapEditor,
+        painter: &egui::Painter,
+        ld: &LevelRenderData,
+        _json: Option<&serde_json::Value>,
+        tile_size: f32,
+        view: Rect,
+        ctx: &egui::Context,
+    ) {
+        let margin = CULLING_THRESHOLD_BASE * (2.0 / editor.zoom_level.max(0.1));
+        let expanded_view = view.expand(margin);
+        batch_render_bg_tiles(editor, painter, ld, tile_size, expanded_view, ctx);
+    }
+}
+
+pub struct BgDecalLayer;
+impl Layer for BgDecalLayer {
+    fn render(
+        &self,
+        editor: &mut CelesteMapEditor,
+        painter: &egui::Painter,
+        ld: &LevelRenderData,
+        json: Option<&serde_json::Value>,
+        _tile_size: f32,
+        _view: Rect,
+        ctx: &egui::Context,
+    ) {
+        if let Some(json) = json {
+            let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
+            render_decals(
+                editor,
+                painter,
+                json,
+                global_scale,
+                ctx,
+                ld.x,
+                ld.y,
+                &|c| c["__name"] == "bgdecals",
+            );
+        }
+    }
+}
+
+pub struct FgTileLayer;
+impl Layer for FgTileLayer {
+    fn render(
+        &self,
+        editor: &mut CelesteMapEditor,
+        painter: &egui::Painter,
+        ld: &LevelRenderData,
+        _json: Option<&serde_json::Value>,
+        tile_size: f32,
+        view: Rect,
+        ctx: &egui::Context,
+    ) {
+        if editor.show_tiles {
+            let margin = CULLING_THRESHOLD_BASE * (2.0 / editor.zoom_level.max(0.1));
+            let expanded_view = view.expand(margin);
+            batch_render_tiles(editor, painter, ld, tile_size, expanded_view, ctx);
+        }
+    }
+}
+
+pub struct FgDecalLayer;
+impl Layer for FgDecalLayer {
+    fn render(
+        &self,
+        editor: &mut CelesteMapEditor,
+        painter: &egui::Painter,
+        ld: &LevelRenderData,
+        json: Option<&serde_json::Value>,
+        _tile_size: f32,
+        _view: Rect,
+        ctx: &egui::Context,
+    ) {
+        if editor.show_fgdecals {
+            if let Some(json) = json {
+                let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
+                render_decals(
+                    editor,
+                    painter,
+                    json,
+                    global_scale,
+                    ctx,
+                    ld.x,
+                    ld.y,
+                    &|c| c["__name"] == "fgdecals",
+                );
+            }
+        }
+    }
+}
+
+pub struct LayerRegistry {
+    pub layers: Vec<Box<dyn Layer>>,
+}
+impl LayerRegistry {
+    pub fn new() -> Self {
+        Self {
+            layers: vec![
+                Box::new(BgTileLayer),
+                Box::new(BgDecalLayer),
+                Box::new(FgTileLayer),
+                Box::new(FgDecalLayer),
+            ],
+        }
+    }
+    pub fn render_all(
+        &self,
+        editor: &mut CelesteMapEditor,
+        painter: &egui::Painter,
+        ld: &LevelRenderData,
+        json: Option<&serde_json::Value>,
+        tile_size: f32,
+        view: Rect,
+        ctx: &egui::Context,
+    ) {
+        for layer in &self.layers {
+            layer.render(editor, painter, ld, json, tile_size, view, ctx);
+        }
+    }
+}
+
 /// Render room content
 fn render_room_content(
     editor: &mut CelesteMapEditor,
     painter: &egui::Painter,
     ld: &LevelRenderData,
     json: &serde_json::Value,
-    _tile_size: f32,
+    tile_size: f32,
     view: Rect,
-    _ctx: &egui::Context,
+    ctx: &egui::Context,
 ) {
-    // 1) Topmost overlays (top, grid)
-    // (Grid is drawn in render_central_panel, not here)
-    // 2) Background tiles
-    let margin = CULLING_THRESHOLD_BASE * (2.0 / editor.zoom_level.max(0.1));
-    let expanded_view = view.expand(margin);
-    batch_render_bg_tiles(editor, painter, ld, _tile_size, expanded_view, _ctx);
-    // 3) Background decals
-    let _global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
-    render_decals(
-        editor,
-        painter,
-        json,
-        _global_scale,
-        _ctx,
-        ld.x,
-        ld.y,
-        &|c| c["__name"] == "bgdecals",
+    // Crée un registre de couches à chaque appel (pas de static mut)
+    let registry = LayerRegistry::new();
+    registry.render_all(
+        editor, painter, ld, Some(json), tile_size, view, ctx,
     );
-    // 4) Foreground tiles
-    if editor.show_tiles {
-        batch_render_tiles(editor, painter, ld, _tile_size, expanded_view, _ctx);
-    }
-    // 5) Foreground decals
-    if editor.show_fgdecals {
-        let _global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
-        render_decals(
-            editor,
-            painter,
-            json,
-            _global_scale,
-            _ctx,
-            ld.x,
-            ld.y,
-            &|c| c["__name"] == "fgdecals",
-        );
-    }
-    // 6) The rest (labels, outlines, etc) are handled after this function
-}
-
-/// Draw outline and label
-fn render_room_outline_and_label(
-    editor: &CelesteMapEditor,
-    painter: &egui::Painter,
-    ld: &LevelRenderData,
-    _tile_size: f32,
-    _ctx: &egui::Context,
-    selected: bool,
-) {
-    let _global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
-    let px=(ld.x)*_global_scale-editor.camera_pos.x;
-    let py=(ld.y)*_global_scale-editor.camera_pos.y;
-    let w=ld.width*_global_scale;
-    let h=ld.height*_global_scale;
-    let rect=Rect::from_min_size(Pos2::new(px,py),Vec2::new(w,h));
-    let col=if selected {ROOM_CONTOUR_SELECTED} else {ROOM_CONTOUR_UNSELECTED};
-    let th=if selected {3.0} else {2.0};
-    painter.rect_stroke(rect,0.0,Stroke::new(th,col));
-    if editor.show_labels {
-        painter.text(Pos2::new(px+5.0,py+5.0),egui::Align2::LEFT_TOP,&ld.name,egui::FontId::proportional(16.0),Color32::WHITE);
-    }
+    // Les overlays/labels/outlines restent traités après
 }
 
 /// Render all rooms
@@ -623,6 +709,29 @@ fn render_current_room(
         };
         render_room_content(editor, painter, &ld, &json, _tile_size, view, _ctx);
         render_room_outline_and_label(editor, painter, &ld, _tile_size, _ctx, true);
+    }
+}
+
+/// Draw outline and label
+fn render_room_outline_and_label(
+    editor: &CelesteMapEditor,
+    painter: &egui::Painter,
+    ld: &LevelRenderData,
+    _tile_size: f32,
+    _ctx: &egui::Context,
+    selected: bool,
+) {
+    let _global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
+    let px=(ld.x)*_global_scale-editor.camera_pos.x;
+    let py=(ld.y)*_global_scale-editor.camera_pos.y;
+    let w=ld.width*_global_scale;
+    let h=ld.height*_global_scale;
+    let rect=Rect::from_min_size(Pos2::new(px,py),Vec2::new(w,h));
+    let col=if selected {ROOM_CONTOUR_SELECTED} else {ROOM_CONTOUR_UNSELECTED};
+    let th=if selected {3.0} else {2.0};
+    painter.rect_stroke(rect,0.0,Stroke::new(th,col));
+    if editor.show_labels {
+        painter.text(Pos2::new(px+5.0,py+5.0),egui::Align2::LEFT_TOP,&ld.name,egui::FontId::proportional(16.0),Color32::WHITE);
     }
 }
 
