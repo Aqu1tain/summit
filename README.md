@@ -1,5 +1,7 @@
 # Summit - Celeste Map Editor
 
+![Static Badge](https://img.shields.io/badge/still_in_dev-pre--release-blue)
+
 Summit is a graphical editor for Celeste map files. It uses Cairn for file conversions between Celeste's binary format and JSON.
 
 ## Features
