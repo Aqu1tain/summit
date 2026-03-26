@@ -344,13 +344,19 @@ fn render_decals(
                         .and_then(|am| am.get_sprite("Gameplay", &path))
                     {
                         let global_scale = TILE_SIZE / 8.0 * editor.zoom_level;
+                        let scale = global_scale * DECAL_SCALE;
                         let center_x = (room_x + x) * global_scale - editor.camera_pos.x;
                         let center_y = (room_y + y) * global_scale - editor.camera_pos.y;
 
-                        let width_px  = spr.metadata.width  as f32 * sx * global_scale * DECAL_SCALE;
-                        let height_px = spr.metadata.height as f32 * sy * global_scale * DECAL_SCALE;
+                        let m = &spr.metadata;
+                        let dx = (-m.offset_x as f32 + m.width as f32 * 0.5) - m.real_width as f32 * 0.5;
+                        let dy = (-m.offset_y as f32 + m.height as f32 * 0.5) - m.real_height as f32 * 0.5;
+                        let sprite_cx = center_x + dx * sx.signum() * scale;
+                        let sprite_cy = center_y + dy * sy.signum() * scale;
 
-                        let pos  = Pos2::new(center_x - width_px  * 0.5, center_y - height_px * 0.5);
+                        let width_px  = m.width  as f32 * sx * scale;
+                        let height_px = m.height as f32 * sy * scale;
+                        let pos  = Pos2::new(sprite_cx - width_px * 0.5, sprite_cy - height_px * 0.5);
                         let size = Vec2::new(width_px, height_px);
 
                         editor.atlas_manager.as_ref().unwrap().draw_sprite(
