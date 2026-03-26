@@ -3,11 +3,13 @@
 use eframe::egui;
 use serde_json::Value;
 use log::{debug, info, warn, error};
+use std::time::Instant;
 
 use crate::config::keybindings::KeyBindings;
 use crate::ui::render::render_app;
 use crate::ui::input::handle_input;
 use crate::ui::dialogs::{show_open_dialog, show_key_bindings_dialog, show_celeste_path_dialog};
+use crate::ui::loading::show_loading_screen;
 use crate::data::assets::CelesteAssets;
 use crate::data::celeste_atlas::AtlasManager;
 
@@ -59,6 +61,8 @@ pub struct CelesteMapEditor {
     pub static_dirty: bool,
     pub show_solid_tiles: bool,
     pub show_tiles: bool,
+    pub is_loading: bool,
+    pub loading_start_time: Option<Instant>,
 }
 
 impl Default for CelesteMapEditor {
@@ -93,6 +97,8 @@ impl Default for CelesteMapEditor {
             static_dirty: true,
             show_solid_tiles: true,
             show_tiles: true,
+            is_loading: true,
+            loading_start_time: None,
         }
     }
 }
@@ -101,7 +107,6 @@ impl CelesteMapEditor {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut editor = Self::default();
         editor.key_bindings.load();
-
         // Check if Celeste assets are available, show dialog if not.
         if let Some(ref celeste_dir) = editor.celeste_assets.celeste_dir {
             // Initialize atlas manager if Celeste directory is found.
@@ -122,7 +127,6 @@ impl CelesteMapEditor {
         } else {
             editor.show_celeste_path_dialog = true;
         }
-
         editor
     }
 
@@ -298,18 +302,24 @@ impl CelesteMapEditor {
 
     pub fn update_solids_data(&mut self, new_solids: &str) {
         if let Some(map) = &mut self.map_data {
-            if let Some(levels) = map["__children"][0]["__children"].as_array_mut() {
-                if self.current_level_index < levels.len() {
-                    if let Some(level) = levels.get_mut(self.current_level_index) {
-                        if let Some(children) = level["__children"].as_array_mut() {
-                            for child in children {
-                                if child["__name"] == "solids" {
-                                    child["innerText"] = serde_json::json!(new_solids);
-                                    return;
+            if let Some(children) = map["__children"].as_array_mut() {
+                for child in children {
+                    if child["__name"] == "levels" {
+                        if let Some(levels) = child["__children"].as_array_mut() {
+                            if let Some(level) = levels.get_mut(self.current_level_index) {
+                                if let Some(level_children) = level["__children"].as_array_mut() {
+                                    for lc in level_children {
+                                        if lc["__name"] == "solids" {
+                                            lc["innerText"] = serde_json::json!(new_solids);
+                                            self.cache_rooms();
+                                            self.static_dirty = true;
+                                            return;
+                                        }
+                                    }
                                 }
                             }
-                            warn!("No 'solids' element found to update!");
                         }
+                        return;
                     }
                 }
             }
@@ -326,6 +336,25 @@ impl CelesteMapEditor {
 
 impl eframe::App for CelesteMapEditor {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.is_loading {
+            // Start timer on first update
+            if self.loading_start_time.is_none() {
+                self.loading_start_time = Some(Instant::now());
+            }
+            if let Some(start) = self.loading_start_time {
+                let elapsed = start.elapsed().as_secs_f32();
+                if elapsed < 2.0 {
+                    egui::Area::new("loading_blocker").interactable(false).show(ctx, |ui| {
+                        show_loading_screen(ctx);
+                    });
+                    ctx.request_repaint();
+                    return;
+                } else {
+                    self.is_loading = false;
+                    self.loading_start_time = None;
+                }
+            }
+        }
         // Handle user input.
         handle_input(self, ctx);
         // Render the application.
