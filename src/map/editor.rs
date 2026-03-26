@@ -1,224 +1,109 @@
 use eframe::egui::Pos2;
 use crate::app::CelesteMapEditor;
-use log::{warn};
+
+const CELESTE_TILE_PX: f32 = 8.0;
 
 pub fn place_block(editor: &mut CelesteMapEditor, pos: Pos2) {
-    // If in "all rooms" mode, determine which room was clicked
     if editor.show_all_rooms {
-        let scaled_tile_size = crate::ui::render::TILE_SIZE * editor.zoom_level;
-        
-        if let Some(map) = &editor.map_data {
-            if let Some(levels) = map["__children"][0]["__children"].as_array() {
-                for (i, level) in levels.iter().enumerate() {
-                    if level["__name"] == "level" {
-                        if let (Some(room_x), Some(room_y)) = (level["x"].as_f64(), level["y"].as_f64()) {
-                            let room_width = level.get("width").and_then(|w| w.as_f64()).unwrap_or(320.0);
-                            let room_height = level.get("height").and_then(|h| h.as_f64()).unwrap_or(184.0);
-                            
-                            // Calculate room bounds in screen space
-                            let room_screen_x = room_x as f32 * scaled_tile_size - editor.camera_pos.x;
-                            let room_screen_y = room_y as f32 * scaled_tile_size - editor.camera_pos.y;
-                            let room_screen_width = room_width as f32 * scaled_tile_size;
-                            let room_screen_height = room_height as f32 * scaled_tile_size;
-                            
-                            // Check if click is within this room
-                            if pos.x >= room_screen_x && pos.x < room_screen_x + room_screen_width && 
-                               pos.y >= room_screen_y && pos.y < room_screen_y + room_screen_height {
-                                // Convert room coordinates from pixels to tiles
-                                let room_x_tiles = room_x / 8.0;
-                                let room_y_tiles = room_y / 8.0;
-                                
-                                // Adjust position to be relative to room
-                                let adjusted_x = pos.x + editor.camera_pos.x - (room_x_tiles as f32 * scaled_tile_size);
-                                let adjusted_y = pos.y + editor.camera_pos.y - (room_y_tiles as f32 * scaled_tile_size);
-                                
-                                // Switch to this room and place the block
-                                editor.current_level_index = i;
-                                let adjusted_pos = Pos2::new(adjusted_x, adjusted_y);
-                                place_block_in_current_room(editor, adjusted_pos);
-                                return;
-                            }
-                        }
-                    }
-                }
-            }
+        match find_room_at(editor, pos) {
+            Some(i) => editor.current_level_index = i,
+            None => return,
         }
-    } else {
-        // Normal mode - place block in current room
-        place_block_in_current_room(editor, pos);
     }
+    modify_tile(editor, pos, '9');
 }
-
-pub fn place_block_in_current_room(editor: &mut CelesteMapEditor, pos: Pos2) {
-    let (tile_x, tile_y) = editor.screen_to_map(pos);
-
-    if let Some(level) = editor.get_current_level() {
-        if let (Some(room_x), Some(room_y), Some(room_width), Some(room_height)) = (
-            level["x"].as_f64(),
-            level["y"].as_f64(),
-            level["width"].as_f64(),
-            level["height"].as_f64(),
-        ) {
-            // Convert room coordinates from pixels to tile units (1 tile = 8 pixels)
-            let room_x_tiles = (room_x / 8.0) as i32;
-            let room_y_tiles = (room_y / 8.0) as i32;
-            let room_width_tiles = (room_width / 8.0) as i32;
-            let room_height_tiles = (room_height / 8.0) as i32;
-
-            // Ensure the tile is inside the room's boundaries
-            if tile_x < room_x_tiles || tile_y < room_y_tiles
-                || tile_x >= room_x_tiles + room_width_tiles
-                || tile_y >= room_y_tiles + room_height_tiles
-            {
-                warn!("Attempted to place block outside of room boundaries!");
-                return;
-            }
-        }
-    }
-
-    // Get solids data
-    if let Some(solids) = editor.get_solids_data() {
-        // Get offsets from the solids element
-        let mut offset_x = 0;
-        let mut offset_y = 0;
-
-        if let Some(level) = editor.get_current_level() {
-            if let Some(children) = level["__children"].as_array() {
-                for child in children {
-                    if child["__name"] == "solids" {
-                        offset_x = child["offsetX"].as_i64().unwrap_or(0) as i32;
-                        offset_y = child["offsetY"].as_i64().unwrap_or(0) as i32;
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Adjust tile position for offsets
-        let adjusted_x = tile_x - offset_x;
-        let adjusted_y = tile_y - offset_y;
-
-        // Skip if position would be negative after adjustment
-        if adjusted_x < 0 || adjusted_y < 0 {
-            warn!("Cannot place block at negative position after offset adjustment");
-            return;
-        }
-
-        let mut rows: Vec<String> = solids.split('\n').map(|s| s.to_string()).collect();
-
-        // Ensure we have enough rows
-        while rows.len() <= adjusted_y as usize {
-            rows.push(String::new());
-        }
-
-        // Ensure the row is long enough
-        let row = &mut rows[adjusted_y as usize];
-        while row.len() <= adjusted_x as usize {
-            row.push('0');
-        }
-
-        // Place a solid tile (use '9' or appropriate character based on map type)
-        if let Some(_c) = row.chars().nth(adjusted_x as usize) {
-            let mut new_row = row.clone();
-            new_row.replace_range(adjusted_x as usize..adjusted_x as usize + 1, "9");
-            rows[adjusted_y as usize] = new_row;
-
-            // Update the map data
-            let new_solids = rows.join("\n");
-            editor.update_solids_data(&new_solids);
-        }
-    }
-}
-
 
 pub fn remove_block(editor: &mut CelesteMapEditor, pos: Pos2) {
-    // If in "all rooms" mode, determine which room was clicked
     if editor.show_all_rooms {
-        let scaled_tile_size = crate::ui::render::TILE_SIZE * editor.zoom_level;
-        
-        if let Some(map) = &editor.map_data {
-            if let Some(levels) = map["__children"][0]["__children"].as_array() {
-                for (i, level) in levels.iter().enumerate() {
-                    if level["__name"] == "level" {
-                        if let (Some(room_x), Some(room_y)) = (level["x"].as_f64(), level["y"].as_f64()) {
-                            let room_width = level.get("width").and_then(|w| w.as_f64()).unwrap_or(320.0);
-                            let room_height = level.get("height").and_then(|h| h.as_f64()).unwrap_or(184.0);
-                            
-                            // Calculate room bounds in screen space
-                            let room_screen_x = room_x as f32 * scaled_tile_size - editor.camera_pos.x;
-                            let room_screen_y = room_y as f32 * scaled_tile_size - editor.camera_pos.y;
-                            let room_screen_width = room_width as f32 * scaled_tile_size;
-                            let room_screen_height = room_height as f32 * scaled_tile_size;
-                            
-                            // Check if click is within this room
-                            if pos.x >= room_screen_x && pos.x < room_screen_x + room_screen_width && 
-                               pos.y >= room_screen_y && pos.y < room_screen_y + room_screen_height {
-                                // Adjust position to be relative to room
-                                let adjusted_x = pos.x + editor.camera_pos.x - (room_x as f32 * scaled_tile_size);
-                                let adjusted_y = pos.y + editor.camera_pos.y - (room_y as f32 * scaled_tile_size);
-                                
-                                // Switch to this room and remove the block
-                                editor.current_level_index = i;
-                                let adjusted_pos = Pos2::new(adjusted_x, adjusted_y);
-                                remove_block_in_current_room(editor, adjusted_pos);
-                                return;
-                            }
-                        }
-                    }
-                }
-            }
+        match find_room_at(editor, pos) {
+            Some(i) => editor.current_level_index = i,
+            None => return,
         }
-    } else {
-        // Normal mode - remove block in current room
-        remove_block_in_current_room(editor, pos);
     }
+    modify_tile(editor, pos, '0');
 }
 
-pub fn remove_block_in_current_room(editor: &mut CelesteMapEditor, pos: Pos2) {
-    let (tile_x, tile_y) = editor.screen_to_map(pos);
+fn find_room_at(editor: &CelesteMapEditor, pos: Pos2) -> Option<usize> {
+    let scale = crate::ui::render::TILE_SIZE / CELESTE_TILE_PX * editor.zoom_level;
+    let map = editor.map_data.as_ref()?;
+    let levels = find_levels(map)?;
 
-    // Get solids data
-    if let Some(solids) = editor.get_solids_data() {
-        // Get offsets from the solids element
-        let mut offset_x = 0;
-        let mut offset_y = 0;
+    for (i, level) in levels.iter().enumerate() {
+        if level["__name"] != "level" { continue; }
 
-        if let Some(level) = editor.get_current_level() {
-            if let Some(children) = level["__children"].as_array() {
-                for child in children {
-                    if child["__name"] == "solids" {
-                        offset_x = child["offsetX"].as_i64().unwrap_or(0) as i32;
-                        offset_y = child["offsetY"].as_i64().unwrap_or(0) as i32;
-                        break;
-                    }
-                }
-            }
-        }
+        let rx = level["x"].as_f64()? as f32;
+        let ry = level["y"].as_f64()? as f32;
+        let rw = level["width"].as_f64().unwrap_or(320.0) as f32;
+        let rh = level["height"].as_f64().unwrap_or(184.0) as f32;
 
-        // Adjust tile position for offsets
-        let adjusted_x = tile_x - offset_x;
-        let adjusted_y = tile_y - offset_y;
+        let screen_x = rx * scale - editor.camera_pos.x;
+        let screen_y = ry * scale - editor.camera_pos.y;
 
-        // Skip if position would be negative after adjustment
-        if adjusted_x < 0 || adjusted_y < 0 {
-            return;
-        }
-
-        let mut rows: Vec<String> = solids.split('\n').map(|s| s.to_string()).collect();
-
-        // Check if tile coordinates are valid
-        if adjusted_y >= 0 && adjusted_y < rows.len() as i32 {
-            let row = &mut rows[adjusted_y as usize];
-            if adjusted_x >= 0 && adjusted_x < row.len() as i32 {
-                // Replace with an empty tile ('0')
-                let mut new_row = row.clone();
-                new_row.replace_range(adjusted_x as usize..adjusted_x as usize + 1, "0");
-                rows[adjusted_y as usize] = new_row;
-
-                // Update the map data
-                let new_solids = rows.join("\n");
-                editor.update_solids_data(&new_solids);
-            }
+        if pos.x >= screen_x && pos.x < screen_x + rw * scale
+            && pos.y >= screen_y && pos.y < screen_y + rh * scale
+        {
+            return Some(i);
         }
     }
+    None
+}
+
+fn find_levels(map: &serde_json::Value) -> Option<&Vec<serde_json::Value>> {
+    map["__children"].as_array()?
+        .iter()
+        .find(|c| c["__name"] == "levels")?
+        ["__children"].as_array()
+}
+
+fn get_solids_offset(level: &serde_json::Value) -> (i32, i32) {
+    level["__children"].as_array()
+        .and_then(|children| children.iter().find(|c| c["__name"] == "solids"))
+        .map(|s| (
+            s["offsetX"].as_i64().unwrap_or(0) as i32,
+            s["offsetY"].as_i64().unwrap_or(0) as i32,
+        ))
+        .unwrap_or((0, 0))
+}
+
+fn modify_tile(editor: &mut CelesteMapEditor, pos: Pos2, tile_char: char) {
+    let (abs_x, abs_y) = editor.screen_to_map(pos);
+
+    let Some(level) = editor.get_current_level() else { return };
+    let room_x = level["x"].as_f64().unwrap_or(0.0) as f32;
+    let room_y = level["y"].as_f64().unwrap_or(0.0) as f32;
+    let room_w = (level["width"].as_f64().unwrap_or(0.0) / CELESTE_TILE_PX as f64) as i32;
+    let room_h = (level["height"].as_f64().unwrap_or(0.0) / CELESTE_TILE_PX as f64) as i32;
+    let (offset_x, offset_y) = get_solids_offset(level);
+
+    let origin_x = ((room_x + offset_x as f32) / CELESTE_TILE_PX).floor() as i32;
+    let origin_y = ((room_y + offset_y as f32) / CELESTE_TILE_PX).floor() as i32;
+    let local_x = abs_x - origin_x;
+    let local_y = abs_y - origin_y;
+
+    if local_x < 0 || local_y < 0 || local_x >= room_w || local_y >= room_h { return; }
+
+    let Some(solids) = editor.get_solids_data() else { return };
+    let mut rows: Vec<String> = solids.split('\n').map(|s| s.to_string()).collect();
+
+    if tile_char == '0' {
+        if local_y as usize >= rows.len() { return; }
+        let row = &rows[local_y as usize];
+        if local_x as usize >= row.len() { return; }
+        let mut new_row = row.clone();
+        new_row.replace_range(local_x as usize..local_x as usize + 1, "0");
+        rows[local_y as usize] = new_row;
+    } else {
+        while rows.len() <= local_y as usize {
+            rows.push(String::new());
+        }
+        let row = &mut rows[local_y as usize];
+        while row.len() <= local_x as usize {
+            row.push('0');
+        }
+        let mut new_row = row.clone();
+        new_row.replace_range(local_x as usize..local_x as usize + 1, &tile_char.to_string());
+        rows[local_y as usize] = new_row;
+    }
+
+    editor.update_solids_data(&rows.join("\n"));
 }
