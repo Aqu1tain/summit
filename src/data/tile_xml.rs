@@ -157,7 +157,10 @@ pub fn ensure_tileset_id_path_map_loaded_from_celeste(editor: &CelesteMapEditor)
 }
 
 // --- AUTOTILING DATA STRUCTURES ---
-static TILESET_RULES: OnceCell<HashMap<char, Tileset>> = OnceCell::new();
+lazy_static::lazy_static! {
+    static ref TILESET_RULES: std::sync::Mutex<HashMap<String, HashMap<char, Tileset>>> =
+        std::sync::Mutex::new(HashMap::new());
+}
 
 #[derive(Debug, Clone)]
 pub struct Tileset {
@@ -175,9 +178,11 @@ pub struct SetRule {
     pub tiles: Vec<(u32, u32)>,
 }
 
-/// Loads and caches all tileset definitions from ForegroundTiles.xml or BackgroundTiles.xml, including inherited rules via copy="z".
-pub fn get_tilesets_with_rules(xml_path: &str) -> &HashMap<char, Tileset> {
-    TILESET_RULES.get_or_init(|| load_tilesets_with_rules(xml_path))
+pub fn get_tilesets_with_rules(xml_path: &str) -> HashMap<char, Tileset> {
+    let mut cache = TILESET_RULES.lock().unwrap();
+    cache.entry(xml_path.to_string())
+        .or_insert_with(|| load_tilesets_with_rules(xml_path))
+        .clone()
 }
 
 /// Loads all tileset definitions from ForegroundTiles.xml or BackgroundTiles.xml, including inherited rules via copy="z".

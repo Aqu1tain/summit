@@ -4,7 +4,6 @@ use crate::app::CelesteMapEditor;
 use crate::map::loader::{save_map, save_map_as};
 use crate::data::tile_xml::{self, ensure_tileset_id_path_map_loaded_from_celeste};
 use log::debug;
-use crate::ui::tile_neighbors::TileNeighbors;
 
 // Constants
 pub const TILE_SIZE: f32 = 20.0;
@@ -36,7 +35,6 @@ pub struct LevelRenderData {
     pub bg_autotile_coords: Vec<Vec<Option<(u32, u32)>>>, // cache for autotiling (background)
     pub fg_xml_path: String,
     pub bg_xml_path: String,
-    pub neighbor_masks: Vec<Vec<TileNeighbors>>,
 }
 
 impl LevelRenderData {
@@ -45,7 +43,7 @@ impl LevelRenderData {
         let is_solid = |c: char| is_solid_tile(c);
         self.autotile_coords = self.solids.iter().enumerate().map(|(y, row)| {
             row.iter().enumerate().map(|(x, &tile)| {
-                tile_xml::autotile_tile_coord(tile, &self.solids, x, y, tilesets, &is_solid)
+                tile_xml::autotile_tile_coord(tile, &self.solids, x, y, &tilesets, &is_solid)
             }).collect()
         }).collect();
     }
@@ -55,7 +53,7 @@ impl LevelRenderData {
         let is_air = |c: char| c == '0'; // treat '0' as air, everything else as filled
         self.bg_autotile_coords = self.bg.iter().enumerate().map(|(y, row)| {
             row.iter().enumerate().map(|(x, &tile)| {
-                tile_xml::autotile_tile_coord(tile, &self.bg, x, y, tilesets, &|c| !is_air(c))
+                tile_xml::autotile_tile_coord(tile, &self.bg, x, y, &tilesets, &|c| !is_air(c))
             }).collect()
         }).collect();
     }
@@ -80,11 +78,13 @@ pub(crate) fn extract_level_data(level: &serde_json::Value, editor: &CelesteMapE
 
     let mut solids = Vec::new();
     let mut bg = Vec::new();
-    let offset_x = 0;
-    let offset_y = 0;
+    let mut offset_x = 0;
+    let mut offset_y = 0;
     if let Some(children) = level["__children"].as_array() {
         for child in children {
             if child["__name"] == "solids" {
+                offset_x = child["offsetX"].as_i64().unwrap_or(0) as i32;
+                offset_y = child["offsetY"].as_i64().unwrap_or(0) as i32;
                 if let Some(text) = child["innerText"].as_str() {
                     for line in text.lines() {
                         solids.push(line.chars().collect());
@@ -117,17 +117,9 @@ pub(crate) fn extract_level_data(level: &serde_json::Value, editor: &CelesteMapE
         bg_autotile_coords: Vec::new(),
         fg_xml_path: fg_xml_path.clone(),
         bg_xml_path: bg_xml_path.clone(),
-        neighbor_masks: Vec::new(),
     };
-    // Compute autotile coordinates on load
     ld.compute_autotile_coords(&fg_xml_path);
     ld.compute_bg_autotile_coords(&bg_xml_path);
-    // Compute neighbor masks for internal detection
-    ld.neighbor_masks = ld.solids.iter().enumerate().map(|(y, row)| {
-        row.iter().enumerate().map(|(x, &_tile)| {
-            TileNeighbors::from_grid(&ld.solids, x, y, |c| is_solid_tile(c))
-        }).collect()
-    }).collect();
     Some(ld)
 }
 
@@ -196,12 +188,6 @@ fn render_any_tile(
     let pos = Pos2::new(px, py);
     let rect = Rect::from_min_size(pos, Vec2::splat(tile_size));
 
-    // Infill check
-    let _internal = if let Some(neighs_row) = ld.neighbor_masks.get(y) {
-        if let Some(mask) = neighs_row.get(x) {
-            mask.is_internal()
-        } else { false }
-    } else { false };
     let mut drew_texture = false;
     if !autotile_coords.is_empty() {
         if let Some(coord) = autotile_coords.get(y).and_then(|row| row.get(x)).and_then(|v| *v) {
@@ -226,7 +212,7 @@ fn render_any_tile(
         if let Some(map) = tileset_id_path_map {
             if let Some(path) = tile_xml::get_tileset_path_for_id(map, _tile) {
                 let tilesets = tile_xml::get_tilesets_with_rules(xml_path);
-                if let Some((tile_x, tile_y)) = tile_xml::autotile_tile_coord(_tile, tiles, x, y, tilesets, &|c| !is_air_or_empty(c)) {
+                if let Some((tile_x, tile_y)) = tile_xml::autotile_tile_coord(_tile, tiles, x, y, &tilesets, &|c| !is_air_or_empty(c)) {
                     let region = egui::Rect::from_min_size(
                         egui::Pos2::new((tile_x * 8) as f32, (tile_y * 8) as f32),
                         egui::Vec2::new(8.0, 8.0),
